@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SOS Sismo — Reporte ciudadano</title>
 <meta name="description" content="Reporta y consulta daños estructurales, personas desaparecidas y puntos de donación tras el sismo. Valle del Cauca, Quindío, Chocó, Cauca y Risaralda.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 2'%3E%3Crect width='3' height='1' fill='%23FCD116'/%3E%3Crect y='1' width='3' height='0.5' fill='%23003893'/%3E%3Crect y='1.5' width='3' height='0.5' fill='%23CE1126'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
 <style>
 /* ─── Fuentes auto-hospedadas (la CDN es un punto de falla en emergencia) ─── */
@@ -37,8 +38,17 @@ body{
 }
 :focus-visible{outline:3px solid var(--indigo);outline-offset:2px;border-radius:4px}
 
+/* ─── Aviso: no oficial ─── */
+.disclaimer{
+  background:var(--faint);border-bottom:1px solid var(--border);
+  padding:calc(8px + env(safe-area-inset-top)) 20px 8px;
+  font-size:12.5px;color:var(--muted);text-align:center;line-height:1.5;
+}
+.disclaimer strong{color:var(--tinta);font-weight:600}
+.disclaimer a{color:var(--indigo);font-weight:600}
+
 /* ─── Cabecera ─── */
-header.top{padding:calc(14px + env(safe-area-inset-top)) 20px 10px;max-width:1240px;margin:0 auto}
+header.top{padding:14px 20px 10px;max-width:1240px;margin:0 auto}  /* el safe-area superior lo absorbe .disclaimer */
 .eyebrow{font-weight:700;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
 h1{font-family:var(--serif);font-weight:400;font-size:clamp(26px,5.4vw,40px);line-height:1.15;letter-spacing:-.01em}
 .sub{font-size:clamp(14px,2.4vw,16px);color:var(--muted);line-height:1.6;margin-top:4px}
@@ -231,6 +241,11 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
 </style>
 </head>
 <body>
+
+<div class="disclaimer" role="note">
+  Iniciativa ciudadana independiente — <strong>no es una fuente oficial del Gobierno de Colombia</strong>.
+  Para emergencias llama a la línea <a href="tel:123">123</a>.
+</div>
 
 <header class="top">
   <p class="eyebrow">Reporte ciudadano · Sismo</p>

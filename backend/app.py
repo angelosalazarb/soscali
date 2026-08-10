@@ -28,10 +28,12 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import io
 import json
 import os
+import re
 import sqlite3
 import time
 from collections import defaultdict, deque
@@ -47,10 +49,13 @@ BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
 
 DB_PATH = Path(os.environ.get("SISMO_DB", BASE_DIR / "data" / "sismo.db"))
+FOTOS_DIR = DB_PATH.parent / "fotos"
 
 app = Flask(__name__)
+# la foto viaja en el JSON como base64 (~1.4x su peso real); tope de seguridad
+app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 
-TIPOS = ("dano", "desaparecido", "donacion")
+TIPOS = ("dano", "desaparecido", "donacion", "hospital")
 SEVERIDADES = ("leve", "moderado", "grave", "colapso")
 NECESIDADES = ("agua", "alimentos", "medicamentos", "ropa", "cobijas", "aseo", "otros")
 TIPOS_AYUDA = ("herramientas", "maquinaria", "personas")
@@ -60,7 +65,7 @@ TIPOS_AYUDA = ("herramientas", "maquinaria", "personas")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reportes (
   id                 TEXT PRIMARY KEY,          -- UUID generado en el cliente (idempotencia de la cola offline)
-  tipo               TEXT NOT NULL CHECK (tipo IN ('dano','desaparecido','donacion')),
+  tipo               TEXT NOT NULL CHECK (tipo IN ('dano','desaparecido','donacion','hospital')),
   departamento       TEXT NOT NULL,
   ciudad             TEXT NOT NULL,
   direccion          TEXT,
@@ -104,6 +109,20 @@ def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with db() as conn:
         conn.executescript(SCHEMA)
+        # migración: bases creadas antes del tipo 'hospital' tienen un CHECK
+        # que lo rechaza; SQLite no permite alterar CHECKs → se reconstruye
+        # la tabla una sola vez copiando los datos
+        sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table'"
+                           " AND name='reportes'").fetchone()[0]
+        if "'hospital'" not in sql:
+            conn.executescript(
+                "ALTER TABLE reportes RENAME TO reportes_v1;"
+                + SCHEMA
+                + "INSERT INTO reportes SELECT * FROM reportes_v1;"
+                  "DROP TABLE reportes_v1;")
+            # el RENAME se llevó los índices idx_rep_* y el DROP los eliminó:
+            # segunda pasada del SCHEMA para recrearlos sobre la tabla nueva
+            conn.executescript(SCHEMA)
 
 
 init_db()
@@ -251,6 +270,39 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
         if len("".join(c for c in telefono if c.isdigit())) < 7:
             return None, "El teléfono de contacto es obligatorio (mínimo 7 dígitos)"
 
+    elif tipo == "hospital":
+        # paciente sin identificar reportado por un hospital: llegó solo,
+        # inconsciente o sin datos de su familia. Reporte abierto pero con
+        # datos de quien reporta (la moderación admin filtra falsos).
+        hospital = _texto(extras_in.get("hospital"), 120)
+        rep_nombre = _texto(extras_in.get("reportante_nombre"), 120)
+        rep_cargo = _texto(extras_in.get("reportante_cargo"), 80)
+        desc_fisica = _texto(extras_in.get("descripcion_fisica"), 500)
+        if not hospital or not rep_nombre or not rep_cargo:
+            return None, "Nombre del hospital y nombre y cargo de quien reporta son obligatorios"
+        if not desc_fisica:
+            return None, "La descripción física del paciente es obligatoria"
+        extras["hospital"] = hospital
+        extras["reportante_nombre"] = rep_nombre
+        extras["reportante_cargo"] = rep_cargo
+        extras["descripcion_fisica"] = desc_fisica
+        if extras_in.get("edad_aprox") not in (None, ""):
+            try:
+                edad = int(extras_in["edad_aprox"])
+            except (TypeError, ValueError):
+                return None, "Edad aproximada inválida"
+            if not 0 <= edad <= 120:
+                return None, "Edad aproximada inválida"
+            extras["edad_aprox"] = edad
+        for campo, maximo in (("sexo", 20), ("estado_salud", 40),
+                              ("senas_particulares", 300), ("ropa", 200),
+                              ("fecha_ingreso", 60)):
+            if extras_in.get(campo):
+                extras[campo] = _texto(extras_in[campo], maximo)
+        telefono = _texto(data.get("telefono_contacto"), 30)
+        if len("".join(c for c in telefono if c.isdigit())) < 7:
+            return None, "El teléfono del hospital es obligatorio (mínimo 7 dígitos)"
+
     elif tipo == "donacion":
         if not isinstance(extras_in.get("necesidades"), list):
             return None, "necesidades debe ser una lista"
@@ -271,14 +323,41 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
         "lat": round(lat, 6), "lng": round(lng, 6), "ubicacion_ajustada": ajustada,
         "descripcion": _texto(data.get("descripcion"), 1000),
         "extras": json.dumps(extras, ensure_ascii=False),
-        "telefono_contacto": telefono, "canal": canal,
+        "telefono_contacto": telefono, "canal": canal, "fotos": None,
     }, None
+
+
+def _guardar_foto(fila: dict, foto) -> str | None:
+    """Guarda la foto (data URL base64) en disco y anota el nombre en la fila.
+    Devuelve un mensaje de error o None. Solo aplica a personas (desaparecidos
+    y pacientes de hospital); en otros tipos se ignora sin error."""
+    if not foto or fila["tipo"] not in ("desaparecido", "hospital"):
+        return None
+    m = re.match(r"data:image/(jpeg|png|webp);base64,(.+)$", str(foto), re.S)
+    if not m:
+        return "Formato de foto inválido"
+    try:
+        crudo = base64.b64decode(m.group(2), validate=True)
+    except Exception:
+        return "Foto corrupta"
+    if len(crudo) > 3_000_000:
+        return "La foto supera 3 MB; intenta con una más liviana"
+    # magia del archivo: no confiar en el mime declarado
+    if not (crudo.startswith(b"\xff\xd8") or crudo.startswith(b"\x89PNG")
+            or crudo[8:12] == b"WEBP"):
+        return "El archivo no es una imagen válida"
+    ext = {"jpeg": "jpg", "png": "png", "webp": "webp"}[m.group(1)]
+    FOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    nombre = f"{fila['id']}.{ext}"
+    (FOTOS_DIR / nombre).write_bytes(crudo)
+    fila["fotos"] = nombre
+    return None
 
 
 # Columnas públicas: telefono_contacto queda EXCLUIDO a propósito — el SELECT
 # es explícito para que nunca se filtre por un futuro SELECT *.
 COLS_PUBLICAS = ("id, tipo, departamento, ciudad, direccion, lat, lng,"
-                 " ubicacion_ajustada, descripcion, extras, canal, creado_en")
+                 " ubicacion_ajustada, descripcion, extras, fotos, canal, creado_en")
 
 
 def _fila_publica(f: sqlite3.Row) -> dict:
@@ -324,14 +403,17 @@ def crear_reporte():
     fila, error = validar_reporte(data)
     if error:
         return jsonify({"error": error}), 400
+    error = _guardar_foto(fila, data.get("foto"))
+    if error:
+        return jsonify({"error": error}), 400
 
     try:
         with db() as conn:
             conn.execute(
                 "INSERT INTO reportes (id, tipo, departamento, ciudad, direccion, lat, lng,"
-                " ubicacion_ajustada, descripcion, extras, telefono_contacto, canal)"
+                " ubicacion_ajustada, descripcion, extras, telefono_contacto, canal, fotos)"
                 " VALUES (:id, :tipo, :departamento, :ciudad, :direccion, :lat, :lng,"
-                " :ubicacion_ajustada, :descripcion, :extras, :telefono_contacto, :canal)",
+                " :ubicacion_ajustada, :descripcion, :extras, :telefono_contacto, :canal, :fotos)",
                 fila)
     except sqlite3.IntegrityError:
         # reintento de la cola offline: el servidor ya lo tiene → el cliente lo desencola
@@ -342,9 +424,12 @@ def crear_reporte():
 @app.get("/api/reportes")
 def listar_reportes():
     filtros, params = ["estado='visible'"], []
-    if request.args.get("tipo") in TIPOS:
-        filtros.append("tipo=?")
-        params.append(request.args["tipo"])
+    # tipo acepta lista separada por comas (ej. desaparecido,hospital: la
+    # pestaña Desaparecidos muestra ambos)
+    tipos = [t for t in (request.args.get("tipo") or "").split(",") if t in TIPOS]
+    if tipos:
+        filtros.append(f"tipo IN ({','.join('?' * len(tipos))})")
+        params.extend(tipos)
     for campo in ("departamento", "ciudad"):
         if request.args.get(campo):
             filtros.append(f"{campo}=?")
@@ -374,15 +459,17 @@ def detalle_reporte(rid):
 
 @app.post("/api/reportes/<rid>/contacto")
 def contacto_desaparecido(rid):
-    """Entrega el teléfono de contacto de un desaparecido a quien declara
-    tener información. Cada entrega queda registrada (auditoría antiacoso)."""
+    """Entrega el teléfono de contacto de un desaparecido (familia) o de un
+    paciente sin identificar (hospital) a quien declara tener información.
+    Cada entrega queda registrada (auditoría antiacoso)."""
     if not _rate_ok(f"contacto:{_ip()}", maximo=5, ventana_seg=3600):
         return jsonify({"error": "Demasiadas consultas; intenta más tarde"}), 429
 
     data = request.get_json(silent=True) or {}
     with db() as conn:
         f = conn.execute("SELECT telefono_contacto FROM reportes"
-                         " WHERE id=? AND tipo='desaparecido' AND estado='visible'",
+                         " WHERE id=? AND tipo IN ('desaparecido','hospital')"
+                         " AND estado='visible'",
                          (rid,)).fetchone()
         if not f or not f["telefono_contacto"]:
             return jsonify({"error": "Reporte no encontrado"}), 404
@@ -392,6 +479,18 @@ def contacto_desaparecido(rid):
             (rid, _texto(data.get("nombre_solicitante"), 120), _ip(),
              _texto(request.headers.get("User-Agent"), 300)))
     return jsonify({"telefono_contacto": f["telefono_contacto"]})
+
+
+@app.get("/api/reportes/<rid>/foto")
+def foto_reporte(rid):
+    """Foto de un desaparecido o paciente. Solo de reportes visibles: al
+    ocultar/eliminar un reporte su foto deja de servirse."""
+    with db() as conn:
+        f = conn.execute("SELECT fotos FROM reportes WHERE id=? AND estado='visible'",
+                         (rid,)).fetchone()
+    if not f or not f["fotos"]:
+        return jsonify({"error": "Sin foto"}), 404
+    return send_from_directory(FOTOS_DIR, f["fotos"])
 
 
 @app.get("/api/metricas")
@@ -483,7 +582,8 @@ def admin_accesos():
     for f in filas:
         d = dict(f)
         extras = json.loads(d.pop("reporte_extras") or "{}")
-        d["desaparecido"] = extras.get("nombre", "")
+        # nombre del desaparecido, o del hospital si es un paciente sin identificar
+        d["desaparecido"] = extras.get("nombre") or extras.get("hospital", "")
         out.append(d)
     return jsonify(out)
 
@@ -499,7 +599,9 @@ def admin_exportar():
     campos_extras = ["severidad", "personas_atrapadas", "necesita_ayuda",
                      "ayuda_tipos", "ayuda_detalle", "nombre", "edad",
                      "descripcion_fisica", "visto_ultima_vez", "nombre_punto",
-                     "necesidades", "horario"]
+                     "necesidades", "horario", "hospital", "reportante_nombre",
+                     "reportante_cargo", "sexo", "edad_aprox", "estado_salud",
+                     "senas_particulares", "ropa", "fecha_ingreso"]
     w = csv.writer(buf, delimiter=";")  # ';' — Excel es-CO
     w.writerow(["id", "tipo", "departamento", "ciudad", "direccion", "lat", "lng",
                 "ubicacion_ajustada", "descripcion", "telefono_contacto", "estado",

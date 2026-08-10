@@ -9,7 +9,7 @@ suroccidente colombiano (Valle del Cauca, Quindío, Chocó, Cauca, Risaralda).
 |---|---|
 | `#/mapa` | Mapa Leaflet con todos los reportes, filtros por tipo/departamento/ciudad/fecha y métricas |
 | `#/danos` | Reporte de daño estructural (severidad, personas atrapadas) |
-| `#/desaparecidos` | Reporte de persona desaparecida — el teléfono de contacto **no se publica**: solo se entrega con el botón "Tengo información" y cada consulta queda auditada |
+| `#/desaparecidos` | Dos pestañas: reporte de persona desaparecida (familias) y **pacientes sin identificar** (hospitales: llegaron solos/inconscientes). Ambos con foto opcional comprimida en el navegador. El teléfono de contacto **no se publica**: solo se entrega con "Tengo información" / "Es mi familiar" y cada consulta queda auditada |
 | `#/donaciones` | Puntos que reciben donaciones y qué insumos necesitan |
 
 Decisiones clave:
@@ -58,5 +58,6 @@ backend/
       La costura ya existe: `POST /api/reportes` acepta `canal:"whatsapp"` y
       `/api/catalogo` expone las ciudades; falta el bot conversacional y un
       header interno de autenticación.
-- [ ] Fotos en daños (columna `fotos` reservada; requiere endpoint de subida
-      y moderación de imágenes — descartado en v1 por la red degradada).
+- [ ] Fotos en daños (desaparecidos y pacientes ya las tienen: base64
+      comprimido en el navegador → `data/fotos/`; falta extenderlo a daños
+      y definir moderación de imágenes).

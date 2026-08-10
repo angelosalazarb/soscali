@@ -157,7 +157,7 @@ const TIPO = {dano:'Daño', desaparecido:'Desaparecido', donacion:'Donación', h
 function resumen(r){
   if (r.tipo === 'dano') return `Severidad ${SEV[r.extras.severidad] || '—'}${r.extras.personas_atrapadas ? ' · ATRAPADOS' : ''}${r.extras.necesita_ayuda ? ' · AYUDA: ' + ((r.extras.ayuda_tipos || []).join(', ') || 'sí') + (r.extras.ayuda_detalle ? ' — ' + r.extras.ayuda_detalle : '') : ''}${r.descripcion ? ' · ' + r.descripcion : ''}`;
   if (r.tipo === 'desaparecido') return `${r.extras.nombre || '—'}${r.extras.edad != null ? ', ' + r.extras.edad + ' años' : ''} · visto: ${r.extras.visto_ultima_vez || '—'}`;
-  if (r.tipo === 'mascota') return `${r.extras.nombre_mascota || 'Mascota'} (${r.extras.especie || '—'}${r.extras.raza ? ', ' + r.extras.raza : ''}) · ${r.extras.descripcion_fisica || ''} · perdida: ${r.extras.visto_ultima_vez || '—'}`;
+  if (r.tipo === 'mascota') return `${r.extras.nombre_mascota || 'Mascota'} (${r.extras.especie || '—'}${r.extras.raza ? ', ' + r.extras.raza : ''}) · ${r.extras.situacion === 'encontrada' ? 'ENCONTRADA, buscan dueños' : 'la buscan'} · ${r.extras.descripcion_fisica || ''} · ${r.extras.visto_ultima_vez || '—'}`;
   if (r.tipo === 'hospital') return `${r.extras.hospital || '—'} · ${r.extras.estado_salud || 'sin estado'} · ${r.extras.descripcion_fisica || ''} · reporta: ${r.extras.reportante_nombre || '—'} (${r.extras.reportante_cargo || '—'})`;
   return `${r.extras.nombre_punto || 'Punto'} · ${(r.extras.necesidades || []).join(', ')}`;
 }

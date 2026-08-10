@@ -116,6 +116,17 @@ CREATE TABLE IF NOT EXISTS confirmaciones_log (
   UNIQUE(reporte_id, ip)
 );
 
+-- Tracker de avistamientos: "lo vi en tal parte" (mascotas y desaparecidos).
+CREATE TABLE IF NOT EXISTS avistamientos (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  reporte_id TEXT NOT NULL,
+  nota       TEXT NOT NULL,
+  ip         TEXT,
+  user_agent TEXT,
+  creado_en  TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_avist ON avistamientos(reporte_id, creado_en);
+
 -- Quién marcó un reporte como encontrado/reunido, con su comentario.
 CREATE TABLE IF NOT EXISTS resoluciones_log (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -367,6 +378,10 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
         extras["especie"] = especie
         extras["descripcion_fisica"] = desc_fisica
         extras["visto_ultima_vez"] = visto
+        # busco = se me perdió; encontrada = la tengo y busco a sus dueños
+        extras["situacion"] = (extras_in.get("situacion")
+                               if extras_in.get("situacion") in ("busco", "encontrada")
+                               else "busco")
         if extras_in.get("nombre_mascota"):
             extras["nombre_mascota"] = _texto(extras_in["nombre_mascota"], 60)
         if extras_in.get("raza"):
@@ -861,6 +876,37 @@ def confirmar_reporte(rid):
     return jsonify({"ok": True, "confirmaciones": total})
 
 
+@app.get("/api/reportes/<rid>/avistamientos")
+def listar_avistamientos(rid):
+    with db() as conn:
+        filas = conn.execute(
+            "SELECT nota, creado_en FROM avistamientos WHERE reporte_id=?"
+            " ORDER BY creado_en DESC LIMIT 50", (rid,)).fetchall()
+    return jsonify([dict(f) for f in filas])
+
+
+@app.post("/api/reportes/<rid>/avistamientos")
+def crear_avistamiento(rid):
+    """Tracker comunitario: "lo vi en el parque X hoy a las 3pm". Cada nota
+    suma una pista con su hora; la trazabilidad ayuda a estrechar la búsqueda."""
+    if not _rate_ok(f"avi:{_ip()}", maximo=10, ventana_seg=3600):
+        return jsonify({"error": "Demasiados avistamientos; intenta más tarde"}), 429
+    nota = _texto((request.get_json(silent=True) or {}).get("nota"), 300)
+    if len(nota) < 5:
+        return jsonify({"error": "Cuéntanos dónde y cuándo lo viste"}), 400
+    with db() as conn:
+        f = conn.execute("SELECT tipo, resuelto FROM reportes WHERE id=? AND estado='visible'",
+                         (rid,)).fetchone()
+        if not f or f["tipo"] not in ("mascota", "desaparecido"):
+            return jsonify({"error": "Reporte no encontrado"}), 404
+        conn.execute("INSERT INTO avistamientos (reporte_id, nota, ip, user_agent)"
+                     " VALUES (?,?,?,?)",
+                     (rid, nota, _ip(), _texto(request.headers.get("User-Agent"), 300)))
+        total = conn.execute("SELECT COUNT(*) FROM avistamientos WHERE reporte_id=?",
+                             (rid,)).fetchone()[0]
+    return jsonify({"ok": True, "avistamientos": total})
+
+
 @app.post("/api/reportes/<rid>/encontrado")
 def marcar_encontrado(rid):
     """Cierra el ciclo con la buena noticia: marca un desaparecido, paciente
@@ -1010,7 +1056,7 @@ def admin_exportar():
                      "necesidades", "horario", "hospital", "reportante_nombre",
                      "reportante_cargo", "sexo", "edad_aprox", "estado_salud",
                      "senas_particulares", "ropa", "fecha_ingreso",
-                     "nombre_mascota", "especie", "raza"]
+                     "nombre_mascota", "especie", "raza", "situacion"]
     w = csv.writer(buf, delimiter=";")  # ';' — Excel es-CO
     w.writerow(["id", "tipo", "departamento", "ciudad", "direccion", "lat", "lng",
                 "ubicacion_ajustada", "descripcion", "telefono_contacto", "estado",

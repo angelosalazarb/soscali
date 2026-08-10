@@ -482,6 +482,12 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
 
     <div class="paso" data-stepper="mascota"></div>
 
+    <label>¿Cuál es tu situación? <span class="req" aria-hidden="true">*</span></label>
+    <div class="chips" id="mas-situacion" role="group" aria-label="Situación">
+      <button type="button" class="chip" data-valor="busco" aria-pressed="true">Se me perdió — la busco</button>
+      <button type="button" class="chip" data-valor="encontrada" aria-pressed="false">La encontré — busco a sus dueños</button>
+    </div>
+
     <label>¿Qué animal es? <span class="req" aria-hidden="true">*</span></label>
     <div class="chips" id="mas-especie" role="group" aria-label="Tipo de animal">
       <button type="button" class="chip" data-valor="perro" aria-pressed="false">Perro</button>
@@ -603,6 +609,21 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
        <strong>confirmarlo</strong> — el punto gana validez sin duplicarse.</p>
     <div id="ms-lista" style="display:flex;flex-direction:column;gap:9px;margin-top:14px"></div>
     <button class="btn primario bloque" id="ms-nuevo" style="margin-top:14px">Es distinto — enviar mi reporte</button>
+  </div>
+</div>
+
+<!-- ═══ Modal de avistamiento ═══ -->
+<div class="modal-fondo" id="modal-avistamiento" role="dialog" aria-modal="true" aria-labelledby="ma-titulo">
+  <div class="modal">
+    <h3 id="ma-titulo">Reportar avistamiento</h3>
+    <p>¿Dónde y cuándo lo viste? Cada pista con su hora ayuda a estrechar la búsqueda.</p>
+    <label for="ma-nota">Qué viste <span class="req" aria-hidden="true">*</span></label>
+    <textarea id="ma-nota" maxlength="300" placeholder="Ej.: lo vi hoy ~4pm en el parque de la 14 con 5, iba hacia el sur"></textarea>
+    <p class="error-campo" id="err-ma">Escribe dónde y cuándo (mínimo 5 letras).</p>
+    <div style="display:flex;gap:9px;margin-top:18px">
+      <button class="btn" id="ma-cancelar" style="flex:1">Cancelar</button>
+      <button class="btn primario" id="ma-enviar" style="flex:1">Enviar pista</button>
+    </div>
   </div>
 </div>
 
@@ -946,10 +967,15 @@ const Mapa = (function(){
         necesita = 'Se necesita: ' + r.extras.necesidades.map(n => NEC_NOMBRE[n] || n).join(', ');
       if (r.tipo === 'dano' && r.extras.necesita_ayuda)
         necesita = 'Necesita ayuda: ' + ((r.extras.ayuda_tipos || []).map(t => AYUDA_NOMBRE[t] || t).join(', ') || 'ver detalle');
-      el.innerHTML = `<span class="icono">${svgIcono(r.tipo, colorReporte(r), 22)}</span>
+      el.innerHTML = `${r.fotos
+          ? `<img class="icono" src="/api/reportes/${encodeURIComponent(r.id)}/foto" alt="" loading="lazy"
+               style="width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid var(--border);flex:none">`
+          : `<span class="icono">${svgIcono(r.tipo, colorReporte(r), 22)}</span>`}
         <div><h3>${esc(titulo)}</h3>
         <p>${esc(r.ciudad)}, ${esc(r.departamento)}${r.direccion ? ' · ' + esc(r.direccion) : ''} · ${esc(fechaCorta(r.creado_en))}${(r.confirmaciones || 1) > 1 ? ` · <strong style="color:var(--esmeralda)">${r.confirmaciones} reportes</strong>` : ''}</p>
-        ${r.resuelto ? '<p><span class="badge leve">Encontrado</span></p>' : ''}
+        ${r.resuelto ? '<p><span class="badge leve">Encontrado</span></p>'
+          : (r.tipo === 'mascota' && r.extras.situacion === 'encontrada'
+             ? '<p><span class="badge leve">Encontrada — buscan a sus dueños</span></p>' : '')}
         ${necesita ? `<p style="color:var(--indigo);font-weight:600">${esc(necesita)}</p>` : ''}</div>`;
       const abrir = () => Detalle.abrir(r);
       el.addEventListener('click', abrir);
@@ -1062,9 +1088,12 @@ const Detalle = (function(){
             + fila('Visto por última vez', r.extras.visto_ultima_vez);
     }
     if (r.tipo === 'mascota') {
-      html += fila('Animal', [r.extras.especie, r.extras.raza].filter(Boolean).join(' · '))
+      const buscanDuenos = r.extras.situacion === 'encontrada';
+      html += `<div style="margin-top:10px"><span class="badge ${buscanDuenos ? 'leve' : 'tipo-desaparecido'}">${
+        buscanDuenos ? 'Encontrada — buscan a sus dueños' : 'La están buscando'}</span></div>`
+            + fila('Animal', [r.extras.especie, r.extras.raza].filter(Boolean).join(' · '))
             + fila('Descripción', r.extras.descripcion_fisica)
-            + fila('Se perdió', r.extras.visto_ultima_vez);
+            + fila(buscanDuenos ? 'Fue encontrada' : 'Se perdió', r.extras.visto_ultima_vez);
     }
     if (r.tipo === 'hospital') {
       const sexo = r.extras.sexo ? r.extras.sexo.charAt(0).toUpperCase() + r.extras.sexo.slice(1) : '';
@@ -1096,14 +1125,24 @@ const Detalle = (function(){
                       hospital:'Es mi familiar — ver teléfono del hospital',
                       mascota:'Tengo información'}[r.tipo];
       html += `<button class="btn primario bloque" style="margin-top:14px" id="btn-tengo-info">
-        ${svgIcono(r.tipo,'currentColor',18)} ${rotulo}</button>
-        <button class="btn bloque" style="margin-top:9px" id="btn-encontrado">
+        ${svgIcono(r.tipo,'currentColor',18)} ${rotulo}</button>`;
+      if (r.tipo === 'mascota' || r.tipo === 'desaparecido') {
+        html += `<button class="btn bloque" style="margin-top:9px" id="btn-avistamiento">
+          ${svgIcono(r.tipo,'currentColor',18)} ${r.tipo === 'mascota' ? 'La vi — reportar avistamiento' : 'Lo vi — reportar avistamiento'}</button>`;
+      }
+      html += `<button class="btn bloque" style="margin-top:9px" id="btn-encontrado">
         ${r.tipo === 'mascota' ? '¡Ya apareció! — marcar encontrada' : '¡Ya apareció! — marcar como encontrado'}</button>`;
+    }
+    if (r.tipo === 'mascota' || r.tipo === 'desaparecido') {
+      html += `<div class="dato"><div class="clave">Avistamientos</div>
+        <div class="valor-d" id="avist-lista" data-reporte="${esc(r.id)}"><span style="color:var(--muted)">Cargando…</span></div></div>`;
     }
     $('#sheet-contenido').innerHTML = html;
     $('#sheet').classList.add('visible'); $('#sheet-fondo').classList.add('visible');
     $('#btn-tengo-info')?.addEventListener('click', () => Contacto.abrir(r.id));
     $('#btn-encontrado')?.addEventListener('click', () => Encontrado.abrir(r.id));
+    $('#btn-avistamiento')?.addEventListener('click', () => Avistamiento.abrir(r.id));
+    if ($('#avist-lista')) Avistamiento.cargar(r.id);
     $('#sheet-cerrar').focus();
   }
   function cerrar(){ $('#sheet').classList.remove('visible'); $('#sheet-fondo').classList.remove('visible'); actual = null; }
@@ -1146,6 +1185,51 @@ const Contacto = (function(){
     finally { $('#mc-ver').disabled = false; }
   });
   return { abrir, cerrar };
+})();
+
+/* ═══ Avistamientos: tracker comunitario de "lo vi en tal parte" ═══ */
+const Avistamiento = (function(){
+  let rid = null;
+  async function cargar(id){
+    const cont = $('#avist-lista'); if (!cont || cont.dataset.reporte !== id) return;
+    try {
+      const filas = await (await fetch(`/api/reportes/${encodeURIComponent(id)}/avistamientos`)).json();
+      cont.innerHTML = filas.length
+        ? filas.map(a => `<div style="border-left:3px solid var(--indigo-dim);padding:4px 0 4px 10px;margin:6px 0">
+            ${esc(a.nota)}<br><small style="color:var(--muted)">${esc(fechaCorta(a.creado_en))}</small></div>`).join('')
+        : '<span style="color:var(--muted)">Aún no hay avistamientos. Si lo has visto, repórtalo con el botón de arriba.</span>';
+    } catch(e) { cont.innerHTML = '<span style="color:var(--muted)">No se pudieron cargar.</span>'; }
+  }
+  function abrir(id){
+    rid = id;
+    $('#ma-nota').value = '';
+    $('#err-ma').classList.remove('visible');
+    $('#modal-avistamiento').classList.add('visible');
+    $('#ma-nota').focus();
+  }
+  function cerrar(){ $('#modal-avistamiento').classList.remove('visible'); rid = null; }
+  $('#ma-cancelar').addEventListener('click', cerrar);
+  $('#modal-avistamiento').addEventListener('click', e => { if (e.target === e.currentTarget) cerrar(); });
+  $('#ma-enviar').addEventListener('click', async () => {
+    if (!rid) return;
+    const nota = $('#ma-nota').value.trim();
+    if (nota.length < 5) { $('#err-ma').classList.add('visible'); return; }
+    $('#err-ma').classList.remove('visible');
+    $('#ma-enviar').disabled = true;
+    try {
+      const res = await fetch(`/api/reportes/${encodeURIComponent(rid)}/avistamientos`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({nota}),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+      const id = rid; cerrar();
+      toast('Avistamiento registrado — gracias por la pista.', 'exito');
+      cargar(id);
+    } catch(e) { toast(e.message === 'Failed to fetch' ? 'Sin conexión; intenta de nuevo.' : e.message, 'error'); }
+    finally { $('#ma-enviar').disabled = false; }
+  });
+  return { abrir, cerrar, cargar };
 })();
 
 /* ═══ Modal "¡Ya apareció!": cierra el ciclo con la buena noticia ═══ */
@@ -1562,6 +1646,7 @@ $('#form-hospital').addEventListener('submit', async e => {
 
 /* ═══ Formulario: mascota perdida ═══ */
 const leerEspecie = chipUnico('#mas-especie');
+const leerSituacion = chipUnico('#mas-situacion');
 const fotoMas = montarFoto('#mas-foto', '#mas-foto-prev');
 $('#form-mascota').addEventListener('submit', async e => {
   e.preventDefault();
@@ -1582,6 +1667,7 @@ $('#form-mascota').addEventListener('submit', async e => {
     telefono_contacto: tel,
     foto: fotoMas.valor(),
     extras: { especie, descripcion_fisica: fisica, visto_ultima_vez: visto,
+              situacion: leerSituacion() || 'busco',
               nombre_mascota: $('#mas-nombre').value.trim(),
               raza: $('#mas-raza').value.trim() },
     sitio_web: e.target.querySelector('.honeypot').value,

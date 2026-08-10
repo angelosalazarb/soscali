@@ -30,12 +30,15 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
+import difflib
 import io
 import json
+import math
 import os
 import re
 import sqlite3
 import time
+import unicodedata
 from collections import defaultdict, deque
 from pathlib import Path
 
@@ -80,6 +83,7 @@ CREATE TABLE IF NOT EXISTS reportes (
   fotos              TEXT,                      -- reservado v2 (las subidas no sirven con la red degradada de una emergencia)
   estado             TEXT DEFAULT 'visible',    -- visible | oculto | eliminado (soft delete: nada se borra de la BD)
   canal              TEXT DEFAULT 'web',        -- web | whatsapp (fase 2)
+  confirmaciones     INTEGER DEFAULT 1,         -- cuántas personas han reportado/confirmado esto
   creado_en          TEXT DEFAULT (datetime('now')),
   moderado_en        TEXT,
   moderado_por       TEXT
@@ -96,6 +100,17 @@ CREATE TABLE IF NOT EXISTS accesos_telefono (
   ip                 TEXT,
   user_agent         TEXT,
   creado_en          TEXT DEFAULT (datetime('now'))
+);
+
+-- Confirmaciones comunitarias: quién sumó al contador de un reporte (una por
+-- IP y reporte; la persona que reporta cuenta como la primera).
+CREATE TABLE IF NOT EXISTS confirmaciones_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  reporte_id TEXT NOT NULL,
+  ip         TEXT,
+  user_agent TEXT,
+  creado_en  TEXT DEFAULT (datetime('now')),
+  UNIQUE(reporte_id, ip)
 );
 
 -- Caché de geocoding: cada consulta resuelta (TomTom o Photon) se guarda y
@@ -139,13 +154,24 @@ def init_db() -> None:
         # migración: bases creadas antes del tipo 'hospital' tienen un CHECK
         # que lo rechaza; SQLite no permite alterar CHECKs → se reconstruye
         # la tabla una sola vez copiando los datos
+        # migración: bases creadas antes del contador de confirmaciones
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(reportes)")}
+        if "confirmaciones" not in cols:
+            conn.execute("ALTER TABLE reportes ADD COLUMN confirmaciones INTEGER DEFAULT 1")
         sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table'"
                            " AND name='reportes'").fetchone()[0]
         if "'hospital'" not in sql:
+            # por columnas NOMBRADAS: el orden físico de una base migrada con
+            # ALTER no coincide con el del SCHEMA y un SELECT * posicional
+            # cruzaría los datos
+            columnas = ("id, tipo, departamento, ciudad, direccion, lat, lng,"
+                        " ubicacion_ajustada, descripcion, extras, telefono_contacto,"
+                        " fotos, estado, canal, confirmaciones, creado_en,"
+                        " moderado_en, moderado_por")
             conn.executescript(
                 "ALTER TABLE reportes RENAME TO reportes_v1;"
                 + SCHEMA
-                + "INSERT INTO reportes SELECT * FROM reportes_v1;"
+                + f"INSERT INTO reportes ({columnas}) SELECT {columnas} FROM reportes_v1;"
                   "DROP TABLE reportes_v1;")
             # el RENAME se llevó los índices idx_rep_* y el DROP los eliminó:
             # segunda pasada del SCHEMA para recrearlos sobre la tabla nueva
@@ -398,7 +424,8 @@ def _guardar_foto(fila: dict, foto) -> str | None:
 # Columnas públicas: telefono_contacto queda EXCLUIDO a propósito — el SELECT
 # es explícito para que nunca se filtre por un futuro SELECT *.
 COLS_PUBLICAS = ("id, tipo, departamento, ciudad, direccion, lat, lng,"
-                 " ubicacion_ajustada, descripcion, extras, fotos, canal, creado_en")
+                 " ubicacion_ajustada, descripcion, extras, fotos, canal,"
+                 " confirmaciones, creado_en")
 
 
 def _fila_publica(f: sqlite3.Row) -> dict:
@@ -469,6 +496,12 @@ def crear_reporte():
                     (fila["departamento"], fila["ciudad"], fila["direccion"],
                      _normalizar_direccion(fila["direccion"]).lower(),
                      fila["lat"], fila["lng"]))
+            # quien reporta es la primera confirmación: su IP queda en el log
+            # para que no pueda inflar su propio contador después
+            conn.execute(
+                "INSERT INTO confirmaciones_log (reporte_id, ip, user_agent) VALUES (?,?,?)"
+                " ON CONFLICT(reporte_id, ip) DO NOTHING",
+                (fila["id"], _ip(), _texto(request.headers.get("User-Agent"), 300)))
     except sqlite3.IntegrityError:
         # reintento de la cola offline: el servidor ya lo tiene → el cliente lo desencola
         return jsonify({"ok": True, "duplicado": True}), 409
@@ -681,6 +714,103 @@ def foto_reporte(rid):
     if not f or not f["fotos"]:
         return jsonify({"error": "Sin foto"}), 404
     return send_from_directory(FOTOS_DIR, f["fotos"])
+
+
+# ─── Similares y confirmaciones (validación comunitaria) ─────────────────────
+#
+# Antes de crear un reporte, el frontend pregunta si ya existe algo parecido
+# (mismo tipo y ciudad + cercanía o nombre similar). Si la persona reconoce el
+# suyo entre los similares, en vez de duplicar CONFIRMA el existente: el
+# contador `confirmaciones` es la validación comunitaria del punto.
+
+def _sin_tildes(t: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", t.lower())
+                   if unicodedata.category(c) != "Mn")
+
+
+def _parecido(a: str, b: str) -> float:
+    a, b = _sin_tildes(a.strip()), _sin_tildes(b.strip())
+    if not a or not b:
+        return 0.0
+    if a in b or b in a:
+        return 1.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _dist_m(lat1, lng1, lat2, lng2) -> float:
+    # aproximación plana, suficiente a escala urbana
+    return 111_320 * math.hypot(lat1 - lat2, (lng1 - lng2) * math.cos(math.radians(lat1)))
+
+
+@app.get("/api/reportes/similares")
+def reportes_similares():
+    if not _rate_ok(f"sim:{_ip()}", maximo=20, ventana_seg=60):
+        return jsonify([]), 429
+    tipo = request.args.get("tipo")
+    ciudad = _texto(request.args.get("ciudad"), 60)
+    nombre = _texto(request.args.get("nombre"), 120)
+    sexo = _texto(request.args.get("sexo"), 20)
+    try:
+        edad = int(request.args.get("edad"))
+    except (TypeError, ValueError):
+        edad = None
+    try:
+        lat, lng = float(request.args.get("lat")), float(request.args.get("lng"))
+    except (TypeError, ValueError):
+        lat = lng = None
+    if tipo not in TIPOS or not ciudad:
+        return jsonify([])
+
+    with db() as conn:
+        filas = conn.execute(
+            f"SELECT {COLS_PUBLICAS} FROM reportes WHERE tipo=? AND ciudad=?"
+            " AND estado='visible' ORDER BY creado_en DESC LIMIT 300",
+            (tipo, ciudad)).fetchall()
+
+    similares = []
+    for f in filas:
+        r = _fila_publica(f)
+        ex = r["extras"]
+        cerca = (lat is not None and _dist_m(lat, lng, r["lat"], r["lng"]) < 150)
+        if tipo == "dano":
+            es = cerca
+        elif tipo == "donacion":
+            es = cerca or _parecido(nombre, ex.get("nombre_punto", "")) >= 0.7
+        elif tipo == "desaparecido":
+            # solo por nombre: dos personas distintas pueden llamarse igual,
+            # pero eso lo decide quien reporta viendo la tarjeta (y la foto)
+            es = _parecido(nombre, ex.get("nombre", "")) >= 0.72
+        else:  # hospital: mismo hospital + paciente compatible
+            es = (_parecido(nombre, ex.get("hospital", "")) >= 0.75
+                  and (not sexo or not ex.get("sexo") or sexo == ex["sexo"])
+                  and (edad is None or ex.get("edad_aprox") is None
+                       or abs(edad - ex["edad_aprox"]) <= 10))
+        if es:
+            similares.append(r)
+        if len(similares) == 3:
+            break
+    return jsonify(similares)
+
+
+@app.post("/api/reportes/<rid>/confirmar")
+def confirmar_reporte(rid):
+    """Suma una confirmación comunitaria. Una por IP y reporte: repetir no
+    infla el contador (responde ok con el valor vigente)."""
+    if not _rate_ok(f"conf:{_ip()}", maximo=10, ventana_seg=3600):
+        return jsonify({"error": "Demasiadas confirmaciones; intenta más tarde"}), 429
+    with db() as conn:
+        f = conn.execute("SELECT confirmaciones FROM reportes WHERE id=? AND estado='visible'",
+                         (rid,)).fetchone()
+        if not f:
+            return jsonify({"error": "Reporte no encontrado"}), 404
+        nuevo = conn.execute(
+            "INSERT INTO confirmaciones_log (reporte_id, ip, user_agent) VALUES (?,?,?)"
+            " ON CONFLICT(reporte_id, ip) DO NOTHING",
+            (rid, _ip(), _texto(request.headers.get("User-Agent"), 300))).rowcount
+        if nuevo:
+            conn.execute("UPDATE reportes SET confirmaciones=confirmaciones+1 WHERE id=?", (rid,))
+        total = conn.execute("SELECT confirmaciones FROM reportes WHERE id=?", (rid,)).fetchone()[0]
+    return jsonify({"ok": True, "confirmaciones": total})
 
 
 @app.get("/api/metricas")

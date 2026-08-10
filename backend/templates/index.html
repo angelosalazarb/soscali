@@ -173,6 +173,15 @@ label .req{color:var(--error)}
 .modal{background:var(--card);border-radius:var(--radius);max-width:420px;width:100%;padding:24px;box-shadow:0 24px 60px rgba(26,23,20,.25)}
 .modal h3{font-family:var(--serif);font-weight:400;font-size:21px;margin-bottom:8px}
 .modal p{font-size:14.5px;color:var(--muted)}
+.similar-card{
+  display:flex;flex-direction:column;gap:4px;text-align:left;width:100%;cursor:pointer;
+  background:var(--card);border:1.5px solid var(--border);border-radius:var(--radius);
+  padding:14px 16px;font-family:var(--sans);font-size:14px;color:var(--tinta);
+  transition:border-color var(--trans),background var(--trans);
+}
+.similar-card:hover,.similar-card:focus{border-color:var(--indigo);background:var(--indigo-dim)}
+.similar-card strong{font-family:var(--serif);font-weight:400;font-size:16.5px}
+.similar-card .meta{color:var(--muted);font-size:13px}
 
 /* ─── Formularios ─── */
 .paso{margin-top:14px}
@@ -530,6 +539,17 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
   </div>
 </div>
 
+<!-- ═══ Modal de similares (evitar duplicados confirmando) ═══ -->
+<div class="modal-fondo" id="modal-similares" role="dialog" aria-modal="true" aria-labelledby="ms-titulo">
+  <div class="modal">
+    <h3 id="ms-titulo">¿Es alguno de estos?</h3>
+    <p>Ya hay reportes parecidos cerca. Si el tuyo es el mismo, tócalo para
+       <strong>confirmarlo</strong> — el punto gana validez sin duplicarse.</p>
+    <div id="ms-lista" style="display:flex;flex-direction:column;gap:9px;margin-top:14px"></div>
+    <button class="btn primario bloque" id="ms-nuevo" style="margin-top:14px">Es distinto — enviar mi reporte</button>
+  </div>
+</div>
+
 <!-- ═══ Navegación inferior ═══ -->
 <nav class="inferior" aria-label="Secciones">
   <a href="#/mapa" data-nav="mapa">
@@ -697,6 +717,62 @@ function montarFoto(inputSel, prevSel){
   return { valor: () => dataUrl, reset: () => { inp.value = ''; prev.innerHTML = ''; dataUrl = null; } };
 }
 
+/* ═══ Título legible de un reporte (lista, detalle y similares) ═══ */
+function tituloReporte(r){
+  return r.tipo === 'desaparecido' ? (r.extras.nombre || 'Persona desaparecida')
+       : r.tipo === 'hospital' ? `Paciente sin identificar — ${r.extras.hospital || 'hospital'}`
+       : r.tipo === 'donacion' ? (r.extras.nombre_punto || 'Punto de donación')
+       : `Daño ${SEV_NOMBRE[r.extras.severidad] || ''}`.trim();
+}
+
+/* ═══ Similares: antes de crear, ofrecer confirmar un reporte existente ═══ */
+const Similares = (function(){
+  let resolver = null;
+  function cerrar(valor){
+    $('#modal-similares').classList.remove('visible');
+    resolver?.(valor); resolver = null;
+  }
+  $('#ms-nuevo').addEventListener('click', () => cerrar({accion: 'nuevo'}));
+  $('#modal-similares').addEventListener('click', e => { if (e.target === e.currentTarget) cerrar({accion: 'nuevo'}); });
+
+  async function revisar(payload){
+    let candidatos = [];
+    try {
+      const p = new URLSearchParams({tipo: payload.tipo, ciudad: payload.ciudad,
+                                     lat: payload.lat, lng: payload.lng});
+      const nom = payload.extras?.nombre || payload.extras?.nombre_punto || payload.extras?.hospital || '';
+      if (nom) p.set('nombre', nom);
+      if (payload.extras?.sexo) p.set('sexo', payload.extras.sexo);
+      if (payload.extras?.edad_aprox != null) p.set('edad', payload.extras.edad_aprox);
+      const res = await fetch('/api/reportes/similares?' + p.toString());
+      if (res.ok) candidatos = await res.json();
+    } catch(e) { /* sin red: se sigue con el envío normal */ }
+    if (!candidatos.length) return {accion: 'nuevo'};
+
+    const lista = $('#ms-lista'); lista.innerHTML = '';
+    candidatos.forEach(r => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'similar-card';
+      b.innerHTML = `<strong>${esc(tituloReporte(r))}</strong>
+        <span class="meta">${esc(r.ciudad)}${r.direccion ? ' · ' + esc(r.direccion) : ''} · ${esc(fechaCorta(r.creado_en))}</span>
+        <span class="meta" style="color:var(--indigo);font-weight:600">${r.confirmaciones} ${r.confirmaciones === 1 ? 'persona lo ha reportado' : 'personas lo han reportado'} — tocar para confirmar</span>`;
+      b.addEventListener('click', async () => {
+        b.disabled = true;
+        try {
+          const res = await fetch(`/api/reportes/${encodeURIComponent(r.id)}/confirmar`, {method: 'POST'});
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+          cerrar({accion: 'confirmado', confirmaciones: d.confirmaciones});
+        } catch(e) { toast(e.message, 'error'); b.disabled = false; }
+      });
+      lista.appendChild(b);
+    });
+    $('#modal-similares').classList.add('visible');
+    return new Promise(r => { resolver = r; });
+  }
+  return { revisar };
+})();
+
 /* ═══ Router por hash ═══ */
 const TITULOS = {
   mapa: ['Mapa de afectaciones', 'Reportes ciudadanos en toda Colombia'],
@@ -797,7 +873,7 @@ const Mapa = (function(){
         necesita = 'Necesita ayuda: ' + ((r.extras.ayuda_tipos || []).map(t => AYUDA_NOMBRE[t] || t).join(', ') || 'ver detalle');
       el.innerHTML = `<span class="icono">${svgIcono(r.tipo, colorReporte(r), 22)}</span>
         <div><h3>${esc(titulo)}</h3>
-        <p>${esc(r.ciudad)}, ${esc(r.departamento)}${r.direccion ? ' · ' + esc(r.direccion) : ''} · ${esc(fechaCorta(r.creado_en))}</p>
+        <p>${esc(r.ciudad)}, ${esc(r.departamento)}${r.direccion ? ' · ' + esc(r.direccion) : ''} · ${esc(fechaCorta(r.creado_en))}${(r.confirmaciones || 1) > 1 ? ` · <strong style="color:var(--esmeralda)">${r.confirmaciones} reportes</strong>` : ''}</p>
         ${necesita ? `<p style="color:var(--indigo);font-weight:600">${esc(necesita)}</p>` : ''}</div>`;
       const abrir = () => Detalle.abrir(r);
       el.addEventListener('click', abrir);
@@ -922,7 +998,8 @@ const Detalle = (function(){
     }
     html += fila('Ubicación', `${r.ciudad}, ${r.departamento}${r.direccion ? ' — ' + r.direccion : ''}`)
           + fila('Descripción', r.descripcion)
-          + fila('Reportado', fechaCorta(r.creado_en) + (r.ubicacion_ajustada ? ' · ubicación exacta' : ' · ubicación aproximada'));
+          + fila('Reportado', fechaCorta(r.creado_en) + (r.ubicacion_ajustada ? ' · ubicación exacta' : ' · ubicación aproximada'))
+          + fila('Comunidad', `${r.confirmaciones || 1} ${(r.confirmaciones || 1) === 1 ? 'persona ha reportado esto' : 'personas han reportado esto'}`);
     if (r.tipo === 'desaparecido') {
       html += `<button class="btn primario bloque" style="margin-top:14px" id="btn-tengo-info">
         ${svgIcono('desaparecido','currentColor',18)} Tengo información</button>`;
@@ -1241,6 +1318,13 @@ $('#form-dano').addEventListener('submit', async e => {
     sitio_web: e.target.querySelector('.honeypot').value,
   };
   const btn = e.target.querySelector('[type="submit"]'); btn.disabled = true;
+  const sim = await Similares.revisar(payload);
+  if (sim.accion === 'confirmado') {
+    btn.disabled = false; Stepper.reset('dano'); fotoDano.reset();
+    pantallaExito('#exito-dano', '#form-dano',
+      `Confirmado — ${sim.confirmaciones} personas han reportado este daño`);
+    return;
+  }
   const estado = await enviarReporte(payload); btn.disabled = false;
   if (estado === 'error') return;
   Stepper.reset('dano'); fotoDano.reset();
@@ -1273,6 +1357,13 @@ $('#form-desaparecido').addEventListener('submit', async e => {
     sitio_web: e.target.querySelector('.honeypot').value,
   };
   const btn = e.target.querySelector('[type="submit"]'); btn.disabled = true;
+  const sim = await Similares.revisar(payload);
+  if (sim.accion === 'confirmado') {
+    btn.disabled = false; Stepper.reset('desaparecido'); fotoDes.reset();
+    pantallaExito('#exito-desaparecido', '#form-desaparecido',
+      `Confirmado — ${sim.confirmaciones} personas han reportado a esta persona`);
+    return;
+  }
   const estado = await enviarReporte(payload); btn.disabled = false;
   if (estado === 'error') return;
   Stepper.reset('desaparecido'); fotoDes.reset();
@@ -1327,6 +1418,13 @@ $('#form-hospital').addEventListener('submit', async e => {
     sitio_web: e.target.querySelector('.honeypot').value,
   };
   const btn = e.target.querySelector('[type="submit"]'); btn.disabled = true;
+  const sim = await Similares.revisar(payload);
+  if (sim.accion === 'confirmado') {
+    btn.disabled = false; Stepper.reset('hospital'); fotoHos.reset();
+    pantallaExito('#exito-hospital', '#form-hospital',
+      `Confirmado — este paciente ya estaba registrado (${sim.confirmaciones} reportes)`);
+    return;
+  }
   const estado = await enviarReporte(payload); btn.disabled = false;
   if (estado === 'error') return;
   Stepper.reset('hospital'); fotoHos.reset();
@@ -1352,6 +1450,13 @@ $('#form-donacion').addEventListener('submit', async e => {
     sitio_web: e.target.querySelector('.honeypot').value,
   };
   const btn = e.target.querySelector('[type="submit"]'); btn.disabled = true;
+  const sim = await Similares.revisar(payload);
+  if (sim.accion === 'confirmado') {
+    btn.disabled = false; Stepper.reset('donacion'); fotoDon.reset();
+    pantallaExito('#exito-donacion', '#form-donacion',
+      `Confirmado — ${sim.confirmaciones} personas han reportado este punto`);
+    return;
+  }
   const estado = await enviarReporte(payload); btn.disabled = false;
   if (estado === 'error') return;
   Stepper.reset('donacion'); fotoDon.reset();

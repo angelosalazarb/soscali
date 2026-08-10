@@ -1,0 +1,27 @@
+# /etc/systemd/system/sos-terremoto.service
+#
+# App de reporte ciudadano post-sismo. Corre como el usuario 'sos' en una VM
+# en la nube (no en el homelab: debe seguir viva si se va la energía).
+# HOME explícito: gunicorn >= 26 falla con "Permission denied" sin él.
+
+[Unit]
+Description=SOS Terremoto - reporte ciudadano (Flask/gunicorn :8085)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sos
+Environment=HOME=/opt/soscali
+WorkingDirectory=/opt/soscali/backend
+ExecStart=/opt/soscali/backend/.venv/bin/gunicorn \
+  --workers 1 --threads 4 --bind 127.0.0.1:8085 \
+  --access-logfile - --error-logfile - app:app
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sos-terremoto
+
+[Install]
+WantedBy=multi-user.target

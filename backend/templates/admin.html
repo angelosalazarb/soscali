@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="es-CO">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Moderación — SOS Sismo</title>
+<style>
+@font-face{font-family:'Manrope';src:url('/static/fonts/manrope.woff2') format('woff2');font-weight:200 800;font-display:swap}
+@font-face{font-family:'Noto Serif';src:url('/static/fonts/notoserif.woff2') format('woff2');font-weight:100 900;font-display:swap}
+:root{
+  --marfil:#f5f3ef; --card:#fff; --tinta:#1a1714; --border:#d8d4cc; --faint:#e8e4dd;
+  --muted:#7a7264; --verde-prof:#00332a; --esmeralda:#075d4d; --indigo:#271d67;
+  --indigo-dim:rgba(39,29,103,.07); --vino:#692a27; --terracota:#bc6e56; --error:#9c3532;
+  --serif:'Noto Serif',Georgia,serif; --sans:'Manrope',-apple-system,sans-serif; --radius:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);background:var(--marfil);color:var(--tinta);font-size:14px;line-height:1.55;padding:20px}
+:focus-visible{outline:3px solid var(--indigo);outline-offset:2px}
+.wrap{max-width:1240px;margin:0 auto}
+.eyebrow{font-weight:700;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--serif);font-weight:400;font-size:clamp(24px,4vw,34px);margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px}
+input,select{font-family:var(--sans);font-size:15px;border:1.5px solid var(--border);border-radius:var(--radius);padding:11px 14px;background:var(--card);color:var(--tinta)}
+input:focus,select:focus{border-color:var(--indigo);outline:none}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:9px 22px;border-radius:100px;cursor:pointer;font-family:var(--sans);font-weight:600;font-size:14px;letter-spacing:.04em;border:1.5px solid var(--indigo);color:var(--indigo);background:transparent;text-decoration:none}
+.btn.primario{background:var(--verde-prof);border-color:var(--verde-prof);color:var(--marfil)}
+.btn.mini{min-height:36px;padding:5px 14px;font-size:13px}
+.btn.peligro{border-color:var(--vino);color:var(--vino)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+#login{max-width:380px;margin:8vh auto;display:flex;flex-direction:column;gap:12px}
+.fila-filtros{display:flex;gap:9px;flex-wrap:wrap;margin:14px 0}
+.tabs{display:flex;gap:9px;margin:16px 0 10px}
+.tab{border:1.5px solid var(--border);background:var(--card);border-radius:100px;padding:9px 20px;cursor:pointer;font-weight:600;font-family:var(--sans);font-size:14px}
+.tab[aria-selected="true"]{border-color:var(--indigo);background:var(--indigo-dim);color:var(--indigo)}
+.tabla-caja{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
+table{border-collapse:collapse;width:100%;min-width:860px}
+th{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);text-align:left;padding:12px 14px;border-bottom:1px solid var(--border)}
+td{padding:10px 14px;border-bottom:1px solid var(--faint);vertical-align:top;font-variant-numeric:tabular-nums}
+tr:last-child td{border-bottom:none}
+.badge{display:inline-block;border-radius:100px;padding:3px 11px;font-size:12px;font-weight:700}
+.badge.visible{background:rgba(7,93,77,.1);color:var(--esmeralda)}
+.badge.oculto{background:rgba(188,110,86,.15);color:#8a4a34}
+.badge.eliminado{background:rgba(105,42,39,.12);color:var(--vino)}
+.badge.dano{background:rgba(188,110,86,.15);color:#8a4a34}
+.badge.desaparecido{background:var(--indigo-dim);color:var(--indigo)}
+.badge.donacion{background:rgba(0,51,42,.09);color:var(--verde-prof)}
+.muted{color:var(--muted)}
+#msg{color:var(--error);font-weight:600;min-height:20px}
+.oculto2{display:none!important}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--tinta);color:var(--marfil);border-radius:var(--radius);padding:12px 20px;display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div id="login" class="card">
+  <p class="eyebrow">SOS Sismo · Moderación</p>
+  <h1>Ingreso</h1>
+  <label for="l-user">Usuario</label>
+  <input id="l-user" autocomplete="username">
+  <label for="l-pass">Contraseña</label>
+  <input id="l-pass" type="password" autocomplete="current-password">
+  <p id="msg" aria-live="polite"></p>
+  <button class="btn primario" id="l-btn">Entrar</button>
+</div>
+
+<div id="panel" class="oculto2">
+  <p class="eyebrow">SOS Sismo · Moderación</p>
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+    <h1>Reportes</h1>
+    <div style="display:flex;gap:9px;align-items:center">
+      <span class="muted" id="quien"></span>
+      <button class="btn mini" id="salir">Salir</button>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-tab="reportes">Reportes</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="accesos">Accesos a teléfonos</button>
+  </div>
+
+  <div id="vista-reportes">
+    <div class="fila-filtros">
+      <select id="f-tipo"><option value="">Tipo: todos</option><option value="dano">Daños</option><option value="desaparecido">Desaparecidos</option><option value="donacion">Donaciones</option></select>
+      <select id="f-estado"><option value="">Estado: todos</option><option value="visible">Visibles</option><option value="oculto">Ocultos</option><option value="eliminado">Eliminados</option></select>
+      <button class="btn mini" id="f-refrescar">Refrescar</button>
+      <a class="btn mini" id="f-csv" href="#">Exportar CSV</a>
+    </div>
+    <div class="tabla-caja"><table id="t-reportes">
+      <thead><tr><th>Fecha</th><th>Tipo</th><th>Ciudad</th><th>Detalle</th><th>Teléfono</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+
+  <div id="vista-accesos" class="oculto2">
+    <p class="muted" style="margin-bottom:10px">Quién ha consultado teléfonos de contacto con "Tengo información".</p>
+    <div class="tabla-caja"><table id="t-accesos">
+      <thead><tr><th>Fecha</th><th>Desaparecido</th><th>Solicitante</th><th>IP</th><th>Navegador</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+</div>
+
+</div>
+<div id="toast" role="status"></div>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const Auth = {
+  KEY: 'sos_admin_token',
+  get token(){ try { return localStorage.getItem(this.KEY) || ''; } catch(e){ return ''; } },
+  set token(v){ try { v ? localStorage.setItem(this.KEY, v) : localStorage.removeItem(this.KEY); } catch(e){} },
+};
+function toast(m){ const t = $('#toast'); t.textContent = m; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 3000); }
+
+async function api(path, opts = {}){
+  opts.headers = Object.assign({'Content-Type':'application/json'}, opts.headers || {});
+  if (Auth.token) opts.headers['Authorization'] = 'Bearer ' + Auth.token;
+  const res = await fetch(path, opts);
+  if (res.status === 401) { mostrarLogin(); throw new Error('Sesión expirada'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+  return data;
+}
+
+function mostrarLogin(){ Auth.token = ''; $('#login').classList.remove('oculto2'); $('#panel').classList.add('oculto2'); }
+function mostrarPanel(u){ $('#login').classList.add('oculto2'); $('#panel').classList.remove('oculto2'); $('#quien').textContent = u; cargarReportes(); }
+
+$('#l-btn').addEventListener('click', entrar);
+$('#l-pass').addEventListener('keydown', e => { if (e.key === 'Enter') entrar(); });
+async function entrar(){
+  $('#msg').textContent = '';
+  try {
+    const data = await api('/api/auth/login', {method:'POST',
+      body: JSON.stringify({username: $('#l-user').value.trim(), password: $('#l-pass').value})});
+    Auth.token = data.token;
+    mostrarPanel(data.username);
+  } catch(e) { $('#msg').textContent = e.message; }
+}
+$('#salir').addEventListener('click', mostrarLogin);
+
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.setAttribute('aria-selected', x === t ? 'true' : 'false'));
+  $('#vista-reportes').classList.toggle('oculto2', t.dataset.tab !== 'reportes');
+  $('#vista-accesos').classList.toggle('oculto2', t.dataset.tab !== 'accesos');
+  if (t.dataset.tab === 'accesos') cargarAccesos();
+}));
+
+const SEV = {leve:'Leve', moderado:'Moderado', grave:'Grave', colapso:'Colapso'};
+const TIPO = {dano:'Daño', desaparecido:'Desaparecido', donacion:'Donación'};
+
+function resumen(r){
+  if (r.tipo === 'dano') return `Severidad ${SEV[r.extras.severidad] || '—'}${r.extras.personas_atrapadas ? ' · ATRAPADOS' : ''}${r.descripcion ? ' · ' + r.descripcion : ''}`;
+  if (r.tipo === 'desaparecido') return `${r.extras.nombre || '—'}${r.extras.edad != null ? ', ' + r.extras.edad + ' años' : ''} · visto: ${r.extras.visto_ultima_vez || '—'}`;
+  return `${r.extras.nombre_punto || 'Punto'} · ${(r.extras.necesidades || []).join(', ')}`;
+}
+
+async function cargarReportes(){
+  const p = new URLSearchParams();
+  if ($('#f-tipo').value) p.set('tipo', $('#f-tipo').value);
+  if ($('#f-estado').value) p.set('estado', $('#f-estado').value);
+  $('#f-csv').href = '/api/admin/exportar.csv?' + p.toString();
+  let filas;
+  try { filas = await api('/api/admin/reportes?' + p.toString()); }
+  catch(e) { toast(e.message); return; }
+  const tb = $('#t-reportes tbody');
+  tb.innerHTML = filas.length ? '' : '<tr><td colspan="7" class="muted">Sin reportes.</td></tr>';
+  filas.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${esc((r.creado_en || '').slice(0,16))}</td>
+      <td><span class="badge ${r.tipo}">${TIPO[r.tipo]}</span></td>
+      <td>${esc(r.ciudad)}<br><span class="muted">${esc(r.direccion || '')}</span></td>
+      <td style="max-width:340px">${esc(resumen(r))}</td>
+      <td>${esc(r.telefono_contacto || '—')}</td>
+      <td><span class="badge ${r.estado}">${r.estado}</span><br><span class="muted">${esc(r.moderado_por || '')}</span></td>
+      <td style="white-space:nowrap"></td>`;
+    const acciones = tr.lastElementChild;
+    if (r.estado !== 'eliminado') {
+      const b1 = document.createElement('button');
+      b1.className = 'btn mini';
+      b1.textContent = r.estado === 'visible' ? 'Ocultar' : 'Restaurar';
+      b1.addEventListener('click', async () => {
+        try { await api('/api/admin/reportes/' + r.id, {method:'PATCH',
+          body: JSON.stringify({estado: r.estado === 'visible' ? 'oculto' : 'visible'})});
+          cargarReportes(); } catch(e){ toast(e.message); }
+      });
+      acciones.appendChild(b1);
+      const b2 = document.createElement('button');
+      b2.className = 'btn mini peligro'; b2.style.marginLeft = '6px';
+      b2.textContent = 'Eliminar';
+      b2.addEventListener('click', async () => {
+        if (!confirm('¿Eliminar este reporte? Saldrá de todos los listados (queda en la BD como evidencia).')) return;
+        try { await api('/api/admin/reportes/' + r.id, {method:'DELETE'}); cargarReportes(); }
+        catch(e){ toast(e.message); }
+      });
+      acciones.appendChild(b2);
+    }
+    tb.appendChild(tr);
+  });
+}
+$('#f-refrescar').addEventListener('click', cargarReportes);
+$('#f-tipo').addEventListener('change', cargarReportes);
+$('#f-estado').addEventListener('change', cargarReportes);
+$('#f-csv').addEventListener('click', async function(e){
+  // un <a href> no envía el header Authorization: se descarga vía fetch autenticado
+  e.preventDefault();
+  try {
+    const res = await fetch(this.href, {headers: {'Authorization': 'Bearer ' + Auth.token}});
+    if (res.status === 401) { mostrarLogin(); return; }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const url = URL.createObjectURL(await res.blob());
+    const a = Object.assign(document.createElement('a'), {href: url, download: 'reportes-sos.csv'});
+    a.click(); URL.revokeObjectURL(url);
+  } catch(err) { toast('No se pudo exportar: ' + err.message); }
+});
+
+async function cargarAccesos(){
+  let filas;
+  try { filas = await api('/api/admin/accesos-telefono'); }
+  catch(e) { toast(e.message); return; }
+  const tb = $('#t-accesos tbody');
+  tb.innerHTML = filas.length ? '' : '<tr><td colspan="5" class="muted">Nadie ha consultado teléfonos aún.</td></tr>';
+  filas.forEach(a => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${esc((a.creado_en || '').slice(0,16))}</td><td>${esc(a.desaparecido || a.reporte_id)}</td>
+      <td>${esc(a.nombre_solicitante || '—')}</td><td>${esc(a.ip || '')}</td>
+      <td class="muted" style="max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(a.user_agent || '')}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+// arranque: si hay token intenta entrar directo
+(async () => {
+  if (!Auth.token) return;
+  try { const yo = await api('/api/auth/me'); mostrarPanel(yo.username); } catch(e) {}
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+# SOS Terremoto — Reporte ciudadano
+
+Web mobile-first para reportar y consultar afectaciones tras el sismo en el
+suroccidente colombiano (Valle del Cauca, Quindío, Chocó, Cauca, Risaralda).
+
+**Secciones** (una sola página, navegación inferior + deep-links):
+
+| Ruta | Qué hace |
+|---|---|
+| `#/mapa` | Mapa Leaflet con todos los reportes, filtros por tipo/departamento/ciudad/fecha y métricas |
+| `#/danos` | Reporte de daño estructural (severidad, personas atrapadas) |
+| `#/desaparecidos` | Reporte de persona desaparecida — el teléfono de contacto **no se publica**: solo se entrega con el botón "Tengo información" y cada consulta queda auditada |
+| `#/donaciones` | Puntos que reciben donaciones y qué insumos necesitan |
+
+Decisiones clave:
+
+- **Cola offline:** los reportes se guardan en `localStorage` y se reenvían
+  solos al volver la conexión (`POST /api/reportes` es idempotente por UUID).
+- **Sin geocoding externo:** departamento → ciudad (centroide local) → pin
+  arrastrable. Leaflet va vendorizado; solo los tiles de OSM son externos y
+  hay vista de lista como fallback.
+- **Publicación inmediata + moderación:** todo reporte sale al mapa al
+  instante; `/admin` (JWT + solo por VPN en producción) permite ocultar o
+  eliminar falsos (soft delete).
+
+## Correr en local
+
+```bash
+cd backend
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env    # generar JWT_SECRET_KEY (instrucciones dentro)
+.venv/bin/python auth.py crear admin --admin
+.venv/bin/python app.py --port 8085
+# → http://localhost:8085  (app)   http://localhost:8085/admin  (moderación)
+```
+
+## Estructura
+
+```
+backend/
+├── app.py         # Flask + SQLite (schema, validación por tipo, endpoints)
+├── auth.py        # bcrypt + JWT (copiado del patrón del vault)
+├── catalogo.py    # departamentos/ciudades con centroides (fuente única)
+├── templates/     # index.html (app pública) · admin.html (moderación)
+├── static/        # fuentes woff2 + Leaflet vendorizado
+└── deploy/        # systemd + Caddyfile (VM nube, admin por VPN) + guía
+```
+
+## Pendientes
+
+- [ ] **Revisión de seguridad completa** antes de publicar el dominio
+      (rate-limits, inyección, exposición del teléfono, hardening VM).
+- [ ] Elegir proveedor de nube y dominio; desplegar según `backend/deploy/README-DEPLOY.md`.
+- [ ] **Fase 2 — bot WhatsApp (OpenWA):** ingesta de reportes por mensaje.
+      La costura ya existe: `POST /api/reportes` acepta `canal:"whatsapp"` y
+      `/api/catalogo` expone las ciudades; falta el bot conversacional y un
+      header interno de autenticación.
+- [ ] Fotos en daños (columna `fotos` reservada; requiere endpoint de subida
+      y moderación de imágenes — descartado en v1 por la red degradada).

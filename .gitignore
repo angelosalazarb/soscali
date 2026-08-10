@@ -1,0 +1,14 @@
+# Secretos y datos: un git pull en producción nunca debe tocarlos
+.env
+.env.*
+!.env.example
+backend/data/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Sistema
+.DS_Store
+*.log

@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="es-CO">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SOS Sismo — Reporte ciudadano</title>
+<meta name="description" content="Reporta y consulta daños estructurales, personas desaparecidas y puntos de donación tras el sismo. Valle del Cauca, Quindío, Chocó, Cauca y Risaralda.">
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+<style>
+/* ─── Fuentes auto-hospedadas (la CDN es un punto de falla en emergencia) ─── */
+@font-face{font-family:'Manrope';src:url('/static/fonts/manrope.woff2') format('woff2');font-weight:200 800;font-display:swap}
+@font-face{font-family:'Noto Serif';src:url('/static/fonts/notoserif.woff2') format('woff2');font-weight:100 900;font-display:swap}
+
+/* ─── Tokens (lenguaje visual del sistema marfil, sin marca) ─── */
+:root{
+  --marfil:#f5f3ef; --card:#ffffff; --tinta:#1a1714;
+  --border:#d8d4cc; --faint:#e8e4dd; --muted:#7a7264;
+  --verde-prof:#00332a; --esmeralda:#075d4d;
+  --indigo:#271d67; --indigo-lt:#3d2e8a; --indigo-dim:rgba(39,29,103,.07);
+  --vino:#692a27; --terracota:#bc6e56; --error:#9c3532;
+  --serif:'Noto Serif',Georgia,serif;
+  --sans:'Manrope',-apple-system,'Segoe UI',sans-serif;
+  --radius:14px; --touch:56px;
+  --trans:320ms cubic-bezier(.25,.8,.35,1);
+  --nav-h:calc(64px + env(safe-area-inset-bottom));
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  font-family:var(--sans);background:var(--marfil);color:var(--tinta);
+  font-size:16px;line-height:1.55;min-height:100dvh;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation;
+  padding-bottom:var(--nav-h);
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+:focus-visible{outline:3px solid var(--indigo);outline-offset:2px;border-radius:4px}
+
+/* ─── Cabecera ─── */
+header.top{padding:calc(14px + env(safe-area-inset-top)) 20px 10px;max-width:1240px;margin:0 auto}
+.eyebrow{font-weight:700;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--serif);font-weight:400;font-size:clamp(26px,5.4vw,40px);line-height:1.15;letter-spacing:-.01em}
+.sub{font-size:clamp(14px,2.4vw,16px);color:var(--muted);line-height:1.6;margin-top:4px}
+
+main{max-width:1240px;margin:0 auto;padding:0 16px}
+section[data-vista]{display:none}
+section[data-vista].activa{display:block;animation:aparecer 320ms cubic-bezier(.25,.8,.35,1)}
+@keyframes aparecer{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+h2{font-family:var(--serif);font-weight:400;font-size:clamp(22px,4.6vw,30px);line-height:1.2;margin:18px 0 4px}
+
+/* ─── Tarjetas y métricas ─── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px}
+.metricas{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:14px 0}
+@media(min-width:768px){.metricas{grid-template-columns:repeat(4,1fr)}}
+.metrica{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;display:flex;flex-direction:column;gap:2px}
+.metrica .valor{font-family:var(--serif);font-weight:300;font-size:34px;line-height:1;color:var(--indigo);font-variant-numeric:tabular-nums}
+.metrica .nombre{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.metrica .nombre svg{flex:none}
+
+/* ─── Chips y filtros ─── */
+.chips{display:flex;gap:9px;flex-wrap:wrap;margin:10px 0}
+.chip{
+  display:inline-flex;align-items:center;gap:7px;min-height:44px;padding:8px 18px;
+  border:1.5px solid var(--border);border-radius:100px;background:var(--card);
+  font-family:var(--sans);font-size:14.5px;color:var(--tinta);cursor:pointer;
+  transition:border-color var(--trans),background var(--trans),color var(--trans);
+}
+.chip[aria-pressed="true"]{border-color:var(--indigo);background:var(--indigo-dim);color:var(--indigo);font-weight:600}
+.chip:active{transform:scale(.97)}
+.filtros-fila{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:10px}
+select,input[type="text"],input[type="tel"],input[type="number"],textarea{
+  font-family:var(--sans);font-size:16px;color:var(--tinta);background:var(--card);
+  border:1.5px solid var(--border);border-radius:var(--radius);
+  padding:14px 16px;width:100%;min-height:52px;
+  transition:border-color var(--trans);
+}
+select:focus,input:focus,textarea:focus{border-color:var(--indigo);outline:none}
+.filtros-fila select{width:auto;flex:1;min-width:130px;min-height:44px;padding:8px 12px;font-size:14.5px}
+textarea{resize:vertical;min-height:96px}
+label{display:block;font-weight:600;font-size:14px;margin:16px 0 6px}
+label .req{color:var(--error)}
+.ayuda{font-size:13px;color:var(--muted);margin-top:5px}
+.error-campo{display:none;font-size:13.5px;color:var(--error);margin-top:5px;font-weight:600}
+.error-campo.visible{display:block}
+
+/* ─── Botones ─── */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  min-height:var(--touch);padding:14px 34px;border-radius:100px;cursor:pointer;
+  font-family:var(--sans);font-weight:600;font-size:15.5px;letter-spacing:.06em;
+  border:1.5px solid var(--indigo);color:var(--indigo);background:transparent;
+  transition:background var(--trans),color var(--trans),opacity var(--trans);
+  text-decoration:none;
+}
+.btn.primario{background:var(--verde-prof);border-color:var(--verde-prof);color:var(--marfil);box-shadow:0 6px 24px rgba(0,51,42,.22)}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.bloque{width:100%}
+.btn.peligro{border-color:var(--vino);color:var(--vino)}
+
+/* ─── Mapa ─── */
+#mapa-caja{position:relative;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border);margin-top:6px}
+#mapa{height:min(58vh,520px);background:var(--faint)}
+#aviso-tiles{
+  display:none;position:absolute;inset:auto 10px 10px;z-index:800;
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:12px 16px;font-size:14px;box-shadow:0 8px 24px rgba(26,23,20,.18);
+}
+#aviso-tiles.visible{display:block}
+.leyenda{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin:10px 2px}
+.leyenda span{display:inline-flex;align-items:center;gap:6px}
+.punto{width:12px;height:12px;border-radius:50%;flex:none;border:2px solid var(--card);box-shadow:0 0 0 1px var(--border)}
+
+/* markers */
+.pin-sos{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;
+  border:2.5px solid #fff;box-shadow:0 3px 10px rgba(26,23,20,.35)}
+.pin-sos svg{display:block}
+
+/* ─── Lista fallback ─── */
+#lista-reportes{display:none;flex-direction:column;gap:10px;margin-top:10px}
+#lista-reportes.visible{display:flex}
+.item-reporte{display:flex;gap:12px;align-items:flex-start;cursor:pointer}
+.item-reporte .icono{flex:none;margin-top:2px}
+.item-reporte h3{font-family:var(--serif);font-weight:400;font-size:17px}
+.item-reporte p{font-size:13.5px;color:var(--muted)}
+
+/* ─── Badges ─── */
+.badge{display:inline-flex;align-items:center;gap:6px;border-radius:100px;padding:4px 12px;font-size:12.5px;font-weight:700}
+.badge.grave,.badge.colapso{background:rgba(105,42,39,.12);color:var(--vino)}
+.badge.moderado{background:rgba(188,110,86,.15);color:#8a4a34}
+.badge.leve{background:rgba(7,93,77,.1);color:var(--esmeralda)}
+.badge.tipo-desaparecido{background:var(--indigo-dim);color:var(--indigo)}
+.badge.tipo-donacion{background:rgba(0,51,42,.09);color:var(--verde-prof)}
+.badge.alerta{background:rgba(156,53,50,.12);color:var(--error)}
+
+/* ─── Panel deslizante de detalle ─── */
+#sheet-fondo{display:none;position:fixed;inset:0;background:rgba(26,23,20,.5);z-index:1000}
+#sheet-fondo.visible{display:block}
+#sheet{
+  position:fixed;left:0;right:0;bottom:0;z-index:1001;background:var(--card);
+  border-radius:var(--radius) var(--radius) 0 0;border:1px solid var(--border);border-bottom:none;
+  max-height:82dvh;overflow-y:auto;padding:10px 20px calc(20px + env(safe-area-inset-bottom));
+  transform:translateY(105%);transition:transform var(--trans);
+}
+@media(min-width:768px){ #sheet{left:auto;right:24px;bottom:24px;width:420px;border-radius:var(--radius);border-bottom:1px solid var(--border)} }
+#sheet.visible{transform:none}
+.sheet-asa{width:44px;height:5px;border-radius:100px;background:var(--faint);margin:4px auto 12px}
+.sheet-cerrar{position:absolute;top:12px;right:12px;background:var(--faint);border:none;border-radius:50%;
+  width:44px;height:44px;display:grid;place-items:center;cursor:pointer;color:var(--muted)}
+.dato{margin:10px 0}
+.dato .clave{font-weight:700;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+.dato .valor-d{font-size:15.5px;margin-top:2px}
+
+/* ─── Modales ─── */
+.modal-fondo{display:none;position:fixed;inset:0;background:rgba(26,23,20,.5);z-index:1100;align-items:center;justify-content:center;padding:20px}
+.modal-fondo.visible{display:flex}
+.modal{background:var(--card);border-radius:var(--radius);max-width:420px;width:100%;padding:24px;box-shadow:0 24px 60px rgba(26,23,20,.25)}
+.modal h3{font-family:var(--serif);font-weight:400;font-size:21px;margin-bottom:8px}
+.modal p{font-size:14.5px;color:var(--muted)}
+
+/* ─── Formularios ─── */
+.paso{margin-top:14px}
+.chips-grandes{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+@media(min-width:768px){.chips-grandes{grid-template-columns:repeat(4,1fr)}}
+.chip-grande{
+  display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;
+  border:1.5px solid var(--border);border-radius:var(--radius);background:var(--card);
+  padding:14px 10px;min-height:var(--touch);cursor:pointer;font-size:14px;
+  transition:border-color var(--trans),background var(--trans),color var(--trans);
+}
+.chip-grande[aria-pressed="true"]{border-color:var(--indigo);background:var(--indigo-dim);color:var(--indigo);font-weight:600}
+.mini-mapa{height:230px;border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;margin-top:8px;background:var(--faint)}
+.form-exito{text-align:center;padding:34px 20px}
+.form-exito .circulo{width:72px;height:72px;border-radius:50%;background:rgba(7,93,77,.1);display:grid;place-items:center;margin:0 auto 14px;color:var(--esmeralda)}
+.honeypot{position:absolute;left:-9999px;top:-9999px;height:1px;width:1px;overflow:hidden}
+
+/* ─── Aviso privacidad ─── */
+.nota-privacidad{display:flex;gap:10px;background:var(--indigo-dim);border-radius:var(--radius);padding:14px 16px;font-size:13.5px;color:var(--indigo);margin-top:14px}
+.nota-privacidad svg{flex:none;margin-top:2px}
+
+/* ─── Navegación inferior ─── */
+nav.inferior{
+  position:fixed;left:0;right:0;bottom:0;z-index:900;
+  background:var(--card);border-top:1px solid var(--border);
+  display:flex;justify-content:space-around;
+  padding:6px 4px calc(6px + env(safe-area-inset-bottom));
+}
+nav.inferior a{
+  display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;
+  min-height:52px;justify-content:center;text-decoration:none;color:var(--muted);
+  font-size:11px;font-weight:600;border-radius:10px;position:relative;
+  transition:color var(--trans);
+}
+nav.inferior a.activa{color:var(--indigo)}
+nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;height:3px;border-radius:100px;background:var(--indigo)}
+.badge-cola{position:absolute;top:2px;right:calc(50% - 22px);background:var(--terracota);color:#fff;
+  font-size:10px;font-weight:700;border-radius:100px;min-width:17px;height:17px;display:none;place-items:center;padding:0 4px}
+.badge-cola.visible{display:grid}
+
+/* ─── Toasts ─── */
+#toasts{position:fixed;left:16px;right:16px;bottom:calc(var(--nav-h) + 10px);z-index:1200;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{background:var(--tinta);color:var(--marfil);border-radius:var(--radius);padding:13px 18px;font-size:14.5px;
+  box-shadow:0 8px 24px rgba(26,23,20,.3);animation:aparecer 220ms ease-out}
+.toast.exito{background:var(--verde-prof)}
+.toast.error{background:var(--vino)}
+@media(min-width:768px){ #toasts{left:auto;width:380px} }
+.oculto{display:none!important}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <p class="eyebrow">Reporte ciudadano · Sismo</p>
+  <h1 id="titulo-vista">Mapa de afectaciones</h1>
+  <p class="sub" id="sub-vista">Valle del Cauca · Quindío · Chocó · Cauca · Risaralda</p>
+</header>
+
+<main>
+
+<!-- ═══ VISTA: MAPA ═══ -->
+<section data-vista="mapa" aria-label="Mapa de afectaciones">
+  <div class="metricas" id="metricas" aria-live="polite"></div>
+
+  <div class="chips" id="filtro-tipo" role="group" aria-label="Filtrar por tipo de reporte">
+    <button class="chip" data-tipo="" aria-pressed="true">Todos</button>
+    <button class="chip" data-tipo="dano" aria-pressed="false">Daños</button>
+    <button class="chip" data-tipo="desaparecido" aria-pressed="false">Desaparecidos</button>
+    <button class="chip" data-tipo="donacion" aria-pressed="false">Donaciones</button>
+  </div>
+  <div class="filtros-fila">
+    <select id="filtro-depto" aria-label="Filtrar por departamento"><option value="">Departamento: todos</option></select>
+    <select id="filtro-ciudad" aria-label="Filtrar por ciudad"><option value="">Ciudad: todas</option></select>
+    <select id="filtro-fecha" aria-label="Filtrar por fecha">
+      <option value="">Fecha: todo</option>
+      <option value="24h">Últimas 24 horas</option>
+      <option value="7d">Últimos 7 días</option>
+    </select>
+  </div>
+
+  <div id="mapa-caja">
+    <div id="mapa" role="application" aria-label="Mapa interactivo de reportes"></div>
+    <div id="aviso-tiles">Sin conexión al mapa base. Los reportes siguen disponibles en la lista.
+      <button class="chip" id="btn-ver-lista-aviso" style="min-height:36px;margin-top:6px">Ver como lista</button></div>
+  </div>
+  <div class="leyenda" aria-hidden="true">
+    <span><i class="punto" style="background:#692a27"></i> Daño grave / colapso</span>
+    <span><i class="punto" style="background:#bc6e56"></i> Daño moderado</span>
+    <span><i class="punto" style="background:#075d4d"></i> Daño leve</span>
+    <span><i class="punto" style="background:#271d67"></i> Desaparecido</span>
+    <span><i class="punto" style="background:#00332a"></i> Punto de donación</span>
+  </div>
+  <button class="chip" id="btn-alternar-lista" aria-pressed="false">Ver como lista</button>
+  <div id="lista-reportes" role="list"></div>
+</section>
+
+<!-- ═══ VISTA: DAÑOS ═══ -->
+<section data-vista="danos" aria-label="Reportar daño estructural">
+  <form id="form-dano" novalidate>
+    <div class="paso" data-stepper="dano"></div>
+    <label>Severidad del daño <span class="req" aria-hidden="true">*</span></label>
+    <div class="chips-grandes" id="sev-dano" role="group" aria-label="Severidad del daño">
+      <button type="button" class="chip-grande" data-valor="leve" aria-pressed="false">Leve<small style="color:var(--muted)">Grietas menores</small></button>
+      <button type="button" class="chip-grande" data-valor="moderado" aria-pressed="false">Moderado<small style="color:var(--muted)">Daños visibles</small></button>
+      <button type="button" class="chip-grande" data-valor="grave" aria-pressed="false">Grave<small style="color:var(--muted)">Riesgo de colapso</small></button>
+      <button type="button" class="chip-grande" data-valor="colapso" aria-pressed="false">Colapso<small style="color:var(--muted)">Estructura caída</small></button>
+    </div>
+    <p class="error-campo" id="err-sev">Selecciona la severidad del daño.</p>
+
+    <label for="dano-atrapadas">¿Hay personas atrapadas?</label>
+    <div class="chips" id="dano-atrapadas" role="group">
+      <button type="button" class="chip" data-valor="si" aria-pressed="false">Sí — urgente</button>
+      <button type="button" class="chip" data-valor="no" aria-pressed="false">No</button>
+      <button type="button" class="chip" data-valor="" aria-pressed="true">No sé</button>
+    </div>
+
+    <label for="dano-desc">Describe el daño</label>
+    <textarea id="dano-desc" maxlength="1000" placeholder="Ej.: fachada agrietada, muro caído hacia la calle…"></textarea>
+
+    <input class="honeypot" type="text" name="sitio_web" tabindex="-1" autocomplete="off" aria-hidden="true">
+    <div class="paso"><button type="submit" class="btn primario bloque">Enviar reporte de daño</button></div>
+  </form>
+  <div class="form-exito oculto" id="exito-dano"></div>
+</section>
+
+<!-- ═══ VISTA: DESAPARECIDOS ═══ -->
+<section data-vista="desaparecidos" aria-label="Reportar persona desaparecida">
+  <form id="form-desaparecido" novalidate>
+    <div class="paso" data-stepper="desaparecido"></div>
+
+    <label for="des-nombre">Nombre completo de la persona <span class="req" aria-hidden="true">*</span></label>
+    <input type="text" id="des-nombre" maxlength="120" autocomplete="off" required>
+    <p class="error-campo" id="err-des-nombre">Escribe el nombre de la persona.</p>
+
+    <label for="des-edad">Edad aproximada</label>
+    <input type="number" id="des-edad" min="0" max="120" inputmode="numeric">
+
+    <label for="des-fisica">Descripción física / ropa que vestía</label>
+    <textarea id="des-fisica" maxlength="500" placeholder="Estatura, contextura, ropa, señales particulares…"></textarea>
+
+    <label for="des-visto">¿Dónde y cuándo se vio por última vez? <span class="req" aria-hidden="true">*</span></label>
+    <input type="text" id="des-visto" maxlength="200" placeholder="Ej.: barrio San Fernando, 10 ago 7 p.m." required>
+    <p class="error-campo" id="err-des-visto">Indica dónde y cuándo se vio por última vez.</p>
+
+    <label for="des-tel">Teléfono donde pueden dar información <span class="req" aria-hidden="true">*</span></label>
+    <input type="tel" id="des-tel" maxlength="30" inputmode="tel" autocomplete="tel" placeholder="Ej.: 300 123 4567" required>
+    <p class="error-campo" id="err-des-tel">Escribe un teléfono válido (mínimo 7 dígitos).</p>
+    <div class="nota-privacidad">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <span>Este número <strong>no se publica</strong> en el mapa ni en los listados. Solo se muestra a quien pulse
+      "Tengo información" en el detalle, y cada consulta queda registrada.</span>
+    </div>
+
+    <input class="honeypot" type="text" name="sitio_web" tabindex="-1" autocomplete="off" aria-hidden="true">
+    <div class="paso"><button type="submit" class="btn primario bloque">Enviar reporte de desaparición</button></div>
+  </form>
+  <div class="form-exito oculto" id="exito-desaparecido"></div>
+</section>
+
+<!-- ═══ VISTA: DONACIONES ═══ -->
+<section data-vista="donaciones" aria-label="Reportar punto de donación">
+  <form id="form-donacion" novalidate>
+    <div class="paso" data-stepper="donacion"></div>
+
+    <label for="don-nombre">Nombre del punto (opcional)</label>
+    <input type="text" id="don-nombre" maxlength="120" placeholder="Ej.: Coliseo del barrio, parroquia, colegio…">
+
+    <label>¿Qué insumos se necesitan? <span class="req" aria-hidden="true">*</span></label>
+    <div class="chips" id="don-necesidades" role="group" aria-label="Insumos necesarios">
+      <button type="button" class="chip" data-valor="agua" aria-pressed="false">Agua</button>
+      <button type="button" class="chip" data-valor="alimentos" aria-pressed="false">Alimentos</button>
+      <button type="button" class="chip" data-valor="medicamentos" aria-pressed="false">Medicamentos</button>
+      <button type="button" class="chip" data-valor="ropa" aria-pressed="false">Ropa</button>
+      <button type="button" class="chip" data-valor="cobijas" aria-pressed="false">Cobijas</button>
+      <button type="button" class="chip" data-valor="aseo" aria-pressed="false">Kit de aseo</button>
+      <button type="button" class="chip" data-valor="otros" aria-pressed="false">Otros</button>
+    </div>
+    <p class="error-campo" id="err-don-nec">Selecciona al menos un insumo.</p>
+
+    <label for="don-horario">Horario de recepción</label>
+    <input type="text" id="don-horario" maxlength="120" placeholder="Ej.: todos los días 8 a.m. – 6 p.m.">
+
+    <label for="don-desc">Información adicional</label>
+    <textarea id="don-desc" maxlength="1000" placeholder="Persona de contacto en el punto, indicaciones para llegar…"></textarea>
+
+    <input class="honeypot" type="text" name="sitio_web" tabindex="-1" autocomplete="off" aria-hidden="true">
+    <div class="paso"><button type="submit" class="btn primario bloque">Registrar punto de donación</button></div>
+  </form>
+  <div class="form-exito oculto" id="exito-donacion"></div>
+</section>
+
+</main>
+
+<!-- ═══ Detalle (panel deslizante) ═══ -->
+<div id="sheet-fondo"></div>
+<div id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-titulo">
+  <div class="sheet-asa" aria-hidden="true"></div>
+  <button class="sheet-cerrar" id="sheet-cerrar" aria-label="Cerrar detalle">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+  </button>
+  <div id="sheet-contenido"></div>
+</div>
+
+<!-- ═══ Modal "Tengo información" ═══ -->
+<div class="modal-fondo" id="modal-contacto" role="dialog" aria-modal="true" aria-labelledby="mc-titulo">
+  <div class="modal">
+    <h3 id="mc-titulo">¿Tienes información?</h3>
+    <p>Te mostraremos el teléfono de contacto de la familia. Por seguridad de todos,
+       esta consulta queda registrada.</p>
+    <label for="mc-nombre">Tu nombre (opcional)</label>
+    <input type="text" id="mc-nombre" maxlength="120" autocomplete="name">
+    <div id="mc-resultado" class="oculto" style="text-align:center;margin-top:16px">
+      <p class="eyebrow">Llama o escribe a</p>
+      <a id="mc-tel" href="#" class="btn primario bloque" style="margin-top:8px"></a>
+    </div>
+    <div id="mc-acciones" style="display:flex;gap:9px;margin-top:18px">
+      <button class="btn" id="mc-cancelar" style="flex:1">Cancelar</button>
+      <button class="btn primario" id="mc-ver" style="flex:1">Ver teléfono</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Navegación inferior ═══ -->
+<nav class="inferior" aria-label="Secciones">
+  <a href="#/mapa" data-nav="mapa">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+    Mapa
+    <span class="badge-cola" id="badge-cola" aria-label="Reportes pendientes de envío"></span>
+  </a>
+  <a href="#/danos" data-nav="danos">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.73 18l-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+    Daños
+  </a>
+  <a href="#/desaparecidos" data-nav="desaparecidos">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+    Desaparecidos
+  </a>
+  <a href="#/donaciones" data-nav="donaciones">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.51 4.04 3 5.5l7 7Z"/></svg>
+    Donaciones
+  </a>
+</nav>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script>
+'use strict';
+const $  = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ═══ Catálogo — espejo de backend/catalogo.py (mantener sincronizados) ═══ */
+const CATALOGO = {
+  "Valle del Cauca": {"Cali":[3.4516,-76.5320],"Palmira":[3.5394,-76.3036],"Buenaventura":[3.8801,-77.0312],"Tuluá":[4.0847,-76.1954],"Buga":[3.9008,-76.2983],"Jamundí":[3.2610,-76.5340],"Yumbo":[3.5849,-76.4959],"Cartago":[4.7464,-75.9117]},
+  "Quindío": {"Armenia":[4.5339,-75.6811],"Calarcá":[4.5296,-75.6413],"Montenegro":[4.5664,-75.7505],"La Tebaida":[4.4525,-75.7877],"Circasia":[4.6194,-75.6353],"Quimbaya":[4.6236,-75.7625]},
+  "Chocó": {"Quibdó":[5.6947,-76.6611],"Istmina":[5.1606,-76.6839],"Condoto":[5.0912,-76.6499],"Tadó":[5.2652,-76.5586],"Bahía Solano":[6.2244,-77.4014]},
+  "Cauca": {"Popayán":[2.4448,-76.6147],"Santander de Quilichao":[3.0094,-76.4846],"Puerto Tejada":[3.2341,-76.4180],"Guapi":[2.5716,-77.8858]},
+  "Risaralda": {"Pereira":[4.8087,-75.6906],"Dosquebradas":[4.8318,-75.6731],"Santa Rosa de Cabal":[4.8686,-75.6214],"La Virginia":[4.8996,-75.8828]},
+};
+
+const TIPO_META = {
+  dano:         {nombre:'Daño estructural',   color:'#bc6e56'},
+  desaparecido: {nombre:'Persona desaparecida', color:'#271d67'},
+  donacion:     {nombre:'Punto de donación',  color:'#00332a'},
+};
+const SEV_COLOR = {leve:'#075d4d', moderado:'#bc6e56', grave:'#692a27', colapso:'#692a27'};
+const SEV_NOMBRE = {leve:'Leve', moderado:'Moderado', grave:'Grave', colapso:'Colapso'};
+const NEC_NOMBRE = {agua:'Agua', alimentos:'Alimentos', medicamentos:'Medicamentos', ropa:'Ropa', cobijas:'Cobijas', aseo:'Kit de aseo', otros:'Otros'};
+
+const ICONO = {
+  dano: '<path d="M21.73 18l-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  desaparecido: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  donacion: '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.51 4.04 3 5.5l7 7Z"/>',
+};
+function svgIcono(tipo, color, tam=18){
+  return `<svg width="${tam}" height="${tam}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONO[tipo]}</svg>`;
+}
+function colorReporte(r){
+  return r.tipo === 'dano' ? (SEV_COLOR[r.extras.severidad] || '#bc6e56') : TIPO_META[r.tipo].color;
+}
+
+/* ═══ Toasts ═══ */
+function toast(msg, clase=''){
+  const el = document.createElement('div');
+  el.className = 'toast ' + clase;
+  el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), 4200);
+}
+
+/* ═══ Cola offline (patrón kiosco: el reporte NUNCA se pierde por red) ═══ */
+const Outbox = (function(){
+  const KEY = 'sos_outbox_v1';
+  let flushing = false;
+  const all = () => { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch(e){ return []; } };
+  const set = arr => { try { localStorage.setItem(KEY, JSON.stringify(arr)); } catch(e){} pintarBadge(); };
+  function pintarBadge(){
+    const n = all().length, b = $('#badge-cola');
+    b.textContent = n; b.classList.toggle('visible', n > 0);
+  }
+  function push(data){ const arr = all(); arr.push(data); set(arr); }
+  async function flush(){
+    if (flushing || !navigator.onLine) return;
+    flushing = true;
+    try {
+      let arr = all();
+      let enviados = 0;
+      while (arr.length) {
+        const res = await fetch('/api/reportes', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(arr[0]),
+        });
+        if (res.status === 429) break;              // rate limit: reintentar luego
+        // 409 = el servidor ya lo tiene (reintento duplicado): sale de la cola
+        if (!res.ok && res.status !== 409) {
+          if (res.status === 400) { arr.shift(); set(arr); continue; }  // inválido: no reintentar por siempre
+          throw new Error('HTTP ' + res.status);
+        }
+        arr.shift(); set(arr); enviados++;
+      }
+      if (enviados) { toast(`${enviados} reporte(s) pendiente(s) enviado(s)`, 'exito'); Mapa.recargar(); }
+    } catch(e) {
+      // sin red o backend caído: la cola queda intacta y se reintenta sola
+    } finally { flushing = false; }
+  }
+  window.addEventListener('online', flush);
+  setInterval(flush, 45000);
+  pintarBadge();
+  return { push, flush, pendientes: () => all().length };
+})();
+
+async function enviarReporte(payload){
+  Outbox.push(payload);
+  if (!navigator.onLine) {
+    toast('Sin conexión: tu reporte quedó en cola y se enviará automáticamente.');
+    return 'cola';
+  }
+  await Outbox.flush();
+  return Outbox.pendientes() === 0 ? 'enviado' : 'cola';
+}
+
+/* ═══ Router por hash ═══ */
+const TITULOS = {
+  mapa: ['Mapa de afectaciones', 'Valle del Cauca · Quindío · Chocó · Cauca · Risaralda'],
+  danos: ['Reportar daño estructural', 'Ubica el lugar y describe el daño. Si hay personas atrapadas llama primero al 123.'],
+  desaparecidos: ['Reportar persona desaparecida', 'El teléfono de contacto no se publica: solo se entrega a quien tenga información.'],
+  donaciones: ['Punto de donación', 'Registra dónde se reciben donaciones y qué insumos se necesitan.'],
+};
+function ruta(){
+  const h = (location.hash || '#/mapa').replace('#/','');
+  return TITULOS[h] ? h : 'mapa';
+}
+function navegar(){
+  const v = ruta();
+  $$('section[data-vista]').forEach(s => s.classList.toggle('activa', s.dataset.vista === v));
+  $$('nav.inferior a').forEach(a => {
+    const activa = a.dataset.nav === v;
+    a.classList.toggle('activa', activa);
+    if (activa) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current');
+  });
+  $('#titulo-vista').textContent = TITULOS[v][0];
+  $('#sub-vista').textContent = TITULOS[v][1];
+  if (v === 'mapa') setTimeout(() => Mapa.asegurar(), 30);
+  else Stepper.asegurar(v === 'danos' ? 'dano' : v === 'desaparecidos' ? 'desaparecido' : 'donacion');
+  document.querySelector('main').focus?.();
+}
+window.addEventListener('hashchange', navegar);
+
+/* ═══ Mapa principal ═══ */
+const Mapa = (function(){
+  let mapa = null, capa = null, reportes = [];
+  const filtro = { tipo:'', departamento:'', ciudad:'', fecha:'' };
+
+  function asegurar(){
+    if (mapa) { mapa.invalidateSize(); return; }
+    mapa = L.map('mapa', {zoomControl:true}).setView([3.9, -76.3], 7);
+    const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18, attribution: '&copy; OpenStreetMap',
+    });
+    tiles.on('tileerror', () => $('#aviso-tiles').classList.add('visible'));
+    tiles.on('tileload',  () => $('#aviso-tiles').classList.remove('visible'));
+    tiles.addTo(mapa);
+    capa = L.layerGroup().addTo(mapa);
+    recargar();
+  }
+
+  function params(){
+    const p = new URLSearchParams();
+    if (filtro.tipo) p.set('tipo', filtro.tipo);
+    if (filtro.departamento) p.set('departamento', filtro.departamento);
+    if (filtro.ciudad) p.set('ciudad', filtro.ciudad);
+    if (filtro.fecha) {
+      const d = new Date(Date.now() - (filtro.fecha === '24h' ? 1 : 7) * 864e5);
+      p.set('desde', d.toISOString().slice(0,19).replace('T',' '));
+    }
+    return p.toString();
+  }
+
+  async function recargar(){
+    try {
+      const res = await fetch('/api/reportes?' + params());
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      reportes = await res.json();
+    } catch(e) { toast('No se pudieron cargar los reportes; reintenta.', 'error'); return; }
+    pintar();
+    cargarMetricas();
+  }
+
+  function marker(r){
+    const color = colorReporte(r);
+    const icono = L.divIcon({
+      className: '', iconSize: [34,34], iconAnchor: [17,17],
+      html: `<div class="pin-sos" style="background:${color}">${svgIcono(r.tipo, '#fff', 17)}</div>`,
+    });
+    return L.marker([r.lat, r.lng], {icon: icono, keyboard: true, title: TIPO_META[r.tipo].nombre + ' — ' + r.ciudad})
+            .on('click', () => Detalle.abrir(r));
+  }
+
+  function pintar(){
+    if (capa) { capa.clearLayers(); reportes.forEach(r => capa.addLayer(marker(r))); }
+    // lista (fallback y preferencia)
+    const cont = $('#lista-reportes');
+    cont.innerHTML = reportes.length ? '' :
+      '<div class="card" style="text-align:center;color:var(--muted)">Aún no hay reportes con estos filtros.</div>';
+    reportes.forEach(r => {
+      const el = document.createElement('div');
+      el.className = 'card item-reporte'; el.setAttribute('role','listitem'); el.tabIndex = 0;
+      const titulo = r.tipo === 'desaparecido' ? (r.extras.nombre || 'Persona desaparecida')
+                   : r.tipo === 'donacion' ? (r.extras.nombre_punto || 'Punto de donación')
+                   : `Daño ${SEV_NOMBRE[r.extras.severidad] || ''}`.trim();
+      el.innerHTML = `<span class="icono">${svgIcono(r.tipo, colorReporte(r), 22)}</span>
+        <div><h3>${esc(titulo)}</h3>
+        <p>${esc(r.ciudad)}, ${esc(r.departamento)}${r.direccion ? ' · ' + esc(r.direccion) : ''} · ${esc(fechaCorta(r.creado_en))}</p></div>`;
+      const abrir = () => Detalle.abrir(r);
+      el.addEventListener('click', abrir);
+      el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(); } });
+      cont.appendChild(el);
+    });
+  }
+
+  async function cargarMetricas(){
+    try {
+      const m = await (await fetch('/api/metricas')).json();
+      $('#metricas').innerHTML = `
+        <div class="metrica"><span class="valor">${m.por_tipo.dano}</span><span class="nombre">${svgIcono('dano','#bc6e56',14)} Daños reportados</span></div>
+        <div class="metrica"><span class="valor">${m.por_tipo.desaparecido}</span><span class="nombre">${svgIcono('desaparecido','#271d67',14)} Desaparecidos</span></div>
+        <div class="metrica"><span class="valor">${m.por_tipo.donacion}</span><span class="nombre">${svgIcono('donacion','#00332a',14)} Puntos de donación</span></div>
+        <div class="metrica"><span class="valor">${m.ultimas_24h}</span><span class="nombre">Últimas 24 horas</span></div>`;
+    } catch(e) { /* métricas no críticas */ }
+  }
+
+  return { asegurar, recargar, filtro };
+})();
+
+function fechaCorta(iso){
+  // creado_en llega como 'YYYY-MM-DD HH:MM:SS' en UTC de SQLite
+  const d = new Date((iso || '').replace(' ','T') + 'Z');
+  return isNaN(d) ? '' : d.toLocaleString('es-CO', {day:'numeric', month:'short', hour:'numeric', minute:'2-digit'});
+}
+
+/* filtros */
+(function(){
+  const selD = $('#filtro-depto'), selC = $('#filtro-ciudad');
+  Object.keys(CATALOGO).forEach(d => selD.add(new Option(d, d)));
+  selD.addEventListener('change', () => {
+    Mapa.filtro.departamento = selD.value; Mapa.filtro.ciudad = '';
+    selC.innerHTML = '<option value="">Ciudad: todas</option>';
+    if (selD.value) Object.keys(CATALOGO[selD.value]).forEach(c => selC.add(new Option(c, c)));
+    Mapa.recargar();
+  });
+  selC.addEventListener('change', () => { Mapa.filtro.ciudad = selC.value; Mapa.recargar(); });
+  $('#filtro-fecha').addEventListener('change', e => { Mapa.filtro.fecha = e.target.value; Mapa.recargar(); });
+  $('#filtro-tipo').addEventListener('click', e => {
+    const btn = e.target.closest('.chip'); if (!btn) return;
+    $$('#filtro-tipo .chip').forEach(c => c.setAttribute('aria-pressed', c === btn ? 'true' : 'false'));
+    Mapa.filtro.tipo = btn.dataset.tipo; Mapa.recargar();
+  });
+  const alternar = () => {
+    const lista = $('#lista-reportes'), btn = $('#btn-alternar-lista');
+    const ver = !lista.classList.contains('visible');
+    lista.classList.toggle('visible', ver);
+    btn.setAttribute('aria-pressed', ver); btn.textContent = ver ? 'Ocultar lista' : 'Ver como lista';
+  };
+  $('#btn-alternar-lista').addEventListener('click', alternar);
+  $('#btn-ver-lista-aviso').addEventListener('click', () => { $('#lista-reportes').classList.add('visible'); $('#btn-alternar-lista').textContent = 'Ocultar lista'; });
+})();
+
+/* ═══ Detalle (panel deslizante) ═══ */
+const Detalle = (function(){
+  let actual = null;
+  function fila(clave, valor){ return valor ? `<div class="dato"><div class="clave">${clave}</div><div class="valor-d">${esc(valor)}</div></div>` : ''; }
+  function abrir(r){
+    actual = r;
+    const color = colorReporte(r);
+    let html = `<div style="display:flex;align-items:center;gap:10px;margin-top:4px">
+      <span class="pin-sos" style="background:${color};width:40px;height:40px;display:grid;place-items:center">${svgIcono(r.tipo,'#fff',19)}</span>
+      <div><p class="eyebrow">${TIPO_META[r.tipo].nombre}</p>
+      <h3 id="sheet-titulo" style="font-family:var(--serif);font-weight:400;font-size:20px">${
+        esc(r.tipo === 'desaparecido' ? (r.extras.nombre || '—')
+          : r.tipo === 'donacion' ? (r.extras.nombre_punto || 'Punto de donación')
+          : (r.ciudad + ' — daño ' + (SEV_NOMBRE[r.extras.severidad]||'').toLowerCase()))}</h3></div></div>`;
+    if (r.tipo === 'dano') {
+      html += `<div style="margin-top:10px"><span class="badge ${r.extras.severidad}">${svgIcono('dano','currentColor',13)} Severidad: ${SEV_NOMBRE[r.extras.severidad]}</span>
+        ${r.extras.personas_atrapadas ? ' <span class="badge alerta">Posibles personas atrapadas — 123</span>' : ''}</div>`;
+    }
+    if (r.tipo === 'desaparecido') {
+      html += fila('Edad aproximada', r.extras.edad != null ? r.extras.edad + ' años' : '')
+            + fila('Descripción', r.extras.descripcion_fisica)
+            + fila('Visto por última vez', r.extras.visto_ultima_vez);
+    }
+    if (r.tipo === 'donacion') {
+      const nec = (r.extras.necesidades || []).map(n => `<span class="badge tipo-donacion">${NEC_NOMBRE[n] || n}</span>`).join(' ');
+      html += `<div class="dato"><div class="clave">Se necesita</div><div class="valor-d">${nec || '—'}</div></div>`
+            + fila('Horario', r.extras.horario);
+    }
+    html += fila('Ubicación', `${r.ciudad}, ${r.departamento}${r.direccion ? ' — ' + r.direccion : ''}`)
+          + fila('Descripción', r.descripcion)
+          + fila('Reportado', fechaCorta(r.creado_en) + (r.ubicacion_ajustada ? ' · ubicación exacta' : ' · ubicación aproximada'));
+    if (r.tipo === 'desaparecido') {
+      html += `<button class="btn primario bloque" style="margin-top:14px" id="btn-tengo-info">
+        ${svgIcono('desaparecido','currentColor',18)} Tengo información</button>`;
+    }
+    $('#sheet-contenido').innerHTML = html;
+    $('#sheet').classList.add('visible'); $('#sheet-fondo').classList.add('visible');
+    $('#btn-tengo-info')?.addEventListener('click', () => Contacto.abrir(r.id));
+    $('#sheet-cerrar').focus();
+  }
+  function cerrar(){ $('#sheet').classList.remove('visible'); $('#sheet-fondo').classList.remove('visible'); actual = null; }
+  $('#sheet-cerrar').addEventListener('click', cerrar);
+  $('#sheet-fondo').addEventListener('click', cerrar);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { cerrar(); Contacto.cerrar(); } });
+  return { abrir, cerrar };
+})();
+
+/* ═══ Modal "Tengo información" — el teléfono solo llega aquí ═══ */
+const Contacto = (function(){
+  let rid = null;
+  function abrir(id){
+    rid = id;
+    $('#mc-resultado').classList.add('oculto');
+    $('#mc-acciones').style.display = 'flex';
+    $('#mc-nombre').value = '';
+    $('#modal-contacto').classList.add('visible');
+    $('#mc-nombre').focus();
+  }
+  function cerrar(){ $('#modal-contacto').classList.remove('visible'); rid = null; }
+  $('#mc-cancelar').addEventListener('click', cerrar);
+  $('#modal-contacto').addEventListener('click', e => { if (e.target === e.currentTarget) cerrar(); });
+  $('#mc-ver').addEventListener('click', async () => {
+    if (!rid) return;
+    $('#mc-ver').disabled = true;
+    try {
+      const res = await fetch(`/api/reportes/${encodeURIComponent(rid)}/contacto`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({nombre_solicitante: $('#mc-nombre').value.trim()}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+      const tel = data.telefono_contacto;
+      $('#mc-tel').textContent = tel;
+      $('#mc-tel').href = 'tel:' + tel.replace(/[^+\d]/g,'');
+      $('#mc-resultado').classList.remove('oculto');
+      $('#mc-acciones').style.display = 'none';
+    } catch(e) { toast(e.message === 'Failed to fetch' ? 'Sin conexión; intenta de nuevo.' : e.message, 'error'); }
+    finally { $('#mc-ver').disabled = false; }
+  });
+  return { abrir, cerrar };
+})();
+
+/* ═══ Stepper de ubicación compartido (depto → ciudad → dirección → pin) ═══ */
+const Stepper = (function(){
+  const instancias = {};
+  function plantilla(id){
+    return `
+    <label for="${id}-depto">Departamento <span class="req" aria-hidden="true">*</span></label>
+    <select id="${id}-depto" required><option value="">Selecciona…</option></select>
+    <label for="${id}-ciudad">Ciudad o municipio <span class="req" aria-hidden="true">*</span></label>
+    <select id="${id}-ciudad" required disabled><option value="">Primero el departamento</option></select>
+    <p class="error-campo" id="${id}-err-ciudad">Selecciona departamento y ciudad.</p>
+    <label for="${id}-dir">Dirección o punto de referencia</label>
+    <input type="text" id="${id}-dir" maxlength="200" placeholder="Ej.: Cra 5 # 10-23, frente al parque" autocomplete="street-address">
+    <div class="mini-mapa" id="${id}-mapa" role="application" aria-label="Ajusta el punto en el mapa"></div>
+    <p class="ayuda">El pin cae en el centro de la ciudad: arrástralo al punto exacto si puedes.</p>`;
+  }
+  function crear(id){
+    const cont = document.querySelector(`[data-stepper="${id}"]`);
+    cont.innerHTML = plantilla(id);
+    const selD = $(`#${id}-depto`), selC = $(`#${id}-ciudad`);
+    Object.keys(CATALOGO).forEach(d => selD.add(new Option(d, d)));
+    const st = { mapa:null, pin:null, ajustada:false, id };
+    selD.addEventListener('change', () => {
+      selC.innerHTML = '<option value="">Selecciona…</option>'; selC.disabled = !selD.value;
+      if (selD.value) Object.keys(CATALOGO[selD.value]).forEach(c => selC.add(new Option(c, c)));
+    });
+    selC.addEventListener('change', () => {
+      if (!selD.value || !selC.value) return;
+      const [lat,lng] = CATALOGO[selD.value][selC.value];
+      st.ajustada = false;
+      if (!st.mapa) {
+        st.mapa = L.map(`${id}-mapa`, {zoomControl:true}).setView([lat,lng], 14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:18, attribution:'&copy; OpenStreetMap'}).addTo(st.mapa);
+        st.pin = L.marker([lat,lng], {
+          draggable:true, autoPan:true,
+          icon: L.divIcon({className:'', iconSize:[34,34], iconAnchor:[17,17],
+            html:`<div class="pin-sos" style="background:#271d67">${svgIcono('dano'===id?'dano':id==='desaparecido'?'desaparecido':'donacion','#fff',17)}</div>`}),
+        }).addTo(st.mapa);
+        st.pin.on('dragend', () => { st.ajustada = true; });
+      } else { st.mapa.setView([lat,lng], 14); st.pin.setLatLng([lat,lng]); }
+      setTimeout(() => st.mapa.invalidateSize(), 60);
+    });
+    instancias[id] = st;
+    return st;
+  }
+  function asegurar(id){
+    if (!instancias[id]) crear(id);
+    else instancias[id].mapa?.invalidateSize();
+  }
+  function leer(id){
+    const st = instancias[id];
+    const depto = $(`#${id}-depto`).value, ciudad = $(`#${id}-ciudad`).value;
+    const err = $(`#${id}-err-ciudad`);
+    if (!depto || !ciudad) { err.classList.add('visible'); $(`#${id}-depto`).focus(); return null; }
+    err.classList.remove('visible');
+    let lat, lng;
+    if (st.pin) { const p = st.pin.getLatLng(); lat = p.lat; lng = p.lng; }
+    else [lat,lng] = CATALOGO[depto][ciudad];
+    return { departamento: depto, ciudad, direccion: $(`#${id}-dir`).value.trim(),
+             lat, lng, ubicacion_ajustada: st.ajustada };
+  }
+  function reset(id){
+    const st = instancias[id]; if (!st) return;
+    $(`#${id}-depto`).value = ''; $(`#${id}-ciudad`).innerHTML = '<option value="">Primero el departamento</option>';
+    $(`#${id}-ciudad`).disabled = true; $(`#${id}-dir`).value = '';
+    st.ajustada = false;
+  }
+  return { asegurar, leer, reset };
+})();
+
+/* helpers de chips */
+function chipUnico(contSel){
+  const cont = $(contSel);
+  cont.addEventListener('click', e => {
+    const btn = e.target.closest('[data-valor]'); if (!btn) return;
+    Array.from(cont.querySelectorAll('[data-valor]')).forEach(c => c.setAttribute('aria-pressed', c === btn ? 'true' : 'false'));
+  });
+  return () => cont.querySelector('[aria-pressed="true"]')?.dataset.valor ?? null;
+}
+function chipsMulti(contSel){
+  const cont = $(contSel);
+  cont.addEventListener('click', e => {
+    const btn = e.target.closest('[data-valor]'); if (!btn) return;
+    btn.setAttribute('aria-pressed', btn.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+  });
+  return () => Array.from(cont.querySelectorAll('[aria-pressed="true"]')).map(c => c.dataset.valor);
+}
+
+function pantallaExito(idExito, idForm, mensaje){
+  const form = $(idForm), ex = $(idExito);
+  form.classList.add('oculto');
+  ex.classList.remove('oculto');
+  ex.innerHTML = `<div class="circulo"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></div>
+    <h2>${mensaje}</h2>
+    <p class="sub" style="margin:8px 0 18px">Gracias por ayudar a tu comunidad.</p>
+    <div style="display:flex;gap:9px;flex-direction:column">
+      <a class="btn primario bloque" href="#/mapa">Ver el mapa</a>
+      <button class="btn bloque" data-otro>Enviar otro reporte</button>
+    </div>`;
+  ex.querySelector('[data-otro]').addEventListener('click', () => {
+    ex.classList.add('oculto'); form.classList.remove('oculto'); form.reset?.();
+  });
+  ex.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+/* ═══ Formulario: daños ═══ */
+const leerSev = chipUnico('#sev-dano');
+const leerAtrapadas = chipUnico('#dano-atrapadas');
+$('#form-dano').addEventListener('submit', async e => {
+  e.preventDefault();
+  const ubic = Stepper.leer('dano'); if (!ubic) return;
+  const sev = leerSev();
+  if (!sev) { $('#err-sev').classList.add('visible'); return; }
+  $('#err-sev').classList.remove('visible');
+  const atr = leerAtrapadas();
+  const payload = {
+    id: crypto.randomUUID(), tipo: 'dano', ...ubic,
+    descripcion: $('#dano-desc').value.trim(),
+    extras: { severidad: sev, personas_atrapadas: atr === '' ? null : atr === 'si' },
+    sitio_web: e.target.querySelector('.honeypot').value,
+  };
+  const btn = e.target.querySelector('[type="submit"]'); btn.disabled = true;
+  const estado = await enviarReporte(payload); btn.disabled = false;
+  Stepper.reset('dano');
+  pantallaExito('#exito-dano', '#form-dano',
+    estado === 'enviado' ? 'Daño reportado' : 'Reporte en cola de envío');
+});
+
+/* ═══ Formulario: desaparecidos ═══ */
+$('#form-desaparecido').addEventListener('submit', async e => {
+  e.preventDefault();
+  const ubic = Stepper.leer('desaparecido'); if (!ubic) return;
+  let ok = true;
+  const nombre = $('#des-nombre').value.trim();
+  const visto = $('#des-visto').value.trim();
+  const tel = $('#des-tel').value.trim();
+  $('#err-des-nombre').classList.toggle('visible', !nombre); if (!nombre) ok = false;
+  $('#err-des-visto').classList.toggle('visible', !visto); if (!visto) ok = false;
+  const telOk = (tel.replace(/\D/g,'').length >= 7);
+  $('#err-des-tel').classList.toggle('visible', !telOk); if (!telOk) ok = false;
+  if (!ok) { e.target.querySelector('.error-campo.visible')?.previousElementSibling?.focus?.(); return; }
+  const edad = $('#des-edad').value;
+  const payload = {
+    id: crypto.randomUUID(), tipo: 'desaparecido', ...ubic,
+    telefono_contacto: tel,
+    extras: { nombre, visto_ultima_vez: visto,
+              edad: edad === '' ? null : Number(edad),
+              descripcion_fisica: $('#des-fisica').value.trim() },
+    sitio_web: e.target.querySelector('.honeypot').value,
+  };
+  const btn = e.target.querySelector('[type="submit"]'); btn.disabled = true;
+  const estado = await enviarReporte(payload); btn.disabled = false;
+  Stepper.reset('desaparecido');
+  pantallaExito('#exito-desaparecido', '#form-desaparecido',
+    estado === 'enviado' ? 'Reporte enviado' : 'Reporte en cola de envío');
+});
+
+/* ═══ Formulario: donaciones ═══ */
+const leerNec = chipsMulti('#don-necesidades');
+$('#form-donacion').addEventListener('submit', async e => {
+  e.preventDefault();
+  const ubic = Stepper.leer('donacion'); if (!ubic) return;
+  const nec = leerNec();
+  if (!nec.length) { $('#err-don-nec').classList.add('visible'); return; }
+  $('#err-don-nec').classList.remove('visible');
+  const payload = {
+    id: crypto.randomUUID(), tipo: 'donacion', ...ubic,
+    descripcion: $('#don-desc').value.trim(),
+    extras: { necesidades: nec, nombre_punto: $('#don-nombre').value.trim(),
+              horario: $('#don-horario').value.trim() },
+    sitio_web: e.target.querySelector('.honeypot').value,
+  };
+  const btn = e.target.querySelector('[type="submit"]'); btn.disabled = true;
+  const estado = await enviarReporte(payload); btn.disabled = false;
+  Stepper.reset('donacion');
+  pantallaExito('#exito-donacion', '#form-donacion',
+    estado === 'enviado' ? 'Punto registrado' : 'Registro en cola de envío');
+});
+
+/* ═══ Arranque ═══ */
+navegar();
+Outbox.flush();
+</script>
+</body>
+</html>

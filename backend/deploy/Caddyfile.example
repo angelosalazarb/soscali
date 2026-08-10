@@ -1,0 +1,24 @@
+# Fragmentos para /etc/caddy/Caddyfile en la VM de la nube.
+#
+# Diseño de seguridad:
+#   - El dominio público sirve SOLO la app ciudadana. Las rutas de moderación
+#     (/admin, /api/admin/*, /api/auth/*) responden 403 desde internet.
+#   - El panel admin se sirve en un site block aparte que escucha ÚNICAMENTE
+#     en la IP Tailscale de la VM (100.x.y.z): sin VPN ni siquiera es
+#     alcanzable, además del login JWT.
+#   - Reemplazar sos.example.org y 100.x.y.z por los valores reales.
+
+# ─── Sitio público ────────────────────────────────────────────────────────────
+sos.example.org {
+	@admin path /admin* /api/admin/* /api/auth/*
+	respond @admin "No disponible" 403
+
+	reverse_proxy 127.0.0.1:8085
+}
+
+# ─── Panel admin: solo por Tailscale (VPN) ────────────────────────────────────
+# `tailscale ip -4` en la VM da la IP 100.x.y.z. Se entra desde un equipo del
+# tailnet con http://100.x.y.z/admin (o el nombre MagicDNS de la VM).
+http://100.x.y.z {
+	reverse_proxy 127.0.0.1:8085
+}

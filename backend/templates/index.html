@@ -172,9 +172,11 @@ label .req{color:var(--error)}
 }
 .chip-grande[aria-pressed="true"]{border-color:var(--indigo);background:var(--indigo-dim);color:var(--indigo);font-weight:600}
 .mini-mapa{height:230px;border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;margin-top:8px;background:var(--faint)}
-.autocompletar{position:relative}
+/* z-index 1100: los controles de Leaflet del mini-mapa llegan a 1000 y
+   pintarían encima de las sugerencias sin este stacking context */
+.autocompletar{position:relative;z-index:1100}
 .sugerencias{
-  display:none;position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:950;
+  display:none;position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:1100;
   background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
   box-shadow:0 8px 24px rgba(26,23,20,.18);overflow:hidden;max-height:260px;overflow-y:auto;
 }
@@ -826,19 +828,41 @@ const Stepper = (function(){
     const inputDir = $(`#${id}-dir`), caja = $(`#${id}-sug`);
     let tSug = null, ctrl = null;
     const cerrarSug = () => { caja.classList.remove('visible'); caja.innerHTML = ''; inputDir.setAttribute('aria-expanded','false'); };
+    // El formato colombiano ("Cra 5 #10-23") confunde al geocoder: se expanden
+    // abreviaturas y se quitan # y guiones antes de consultar. El texto del
+    // campo queda tal como lo escribió la persona.
+    function normalizarDir(q){
+      return q
+        .replace(/\b(cll|cl)\.?\s*(?=\d)/gi, 'calle ')
+        .replace(/\b(cra|kra|cr|kr)\.?\s*(?=\d)/gi, 'carrera ')
+        .replace(/\b(av|avda)\.?\s*(?=\d)/gi, 'avenida ')
+        .replace(/\b(dg|diag)\.?\s*(?=\d)/gi, 'diagonal ')
+        .replace(/\b(tv|transv)\.?\s*(?=\d)/gi, 'transversal ')
+        .replace(/\bn[oº°]\.?\s*(?=\d)/gi, ' ')
+        .replace(/[#\-]/g, ' ')
+        .replace(/\s+/g, ' ').trim();
+    }
     inputDir.addEventListener('input', () => {
       clearTimeout(tSug);
       const q = inputDir.value.trim();
       if (q.length < 3 || !selD.value || !selC.value) { cerrarSug(); return; }
       tSug = setTimeout(async () => {
         const [clat, clng] = CATALOGO[selD.value][selC.value];
+        const ciudad = selC.value;
         try {
           ctrl?.abort(); ctrl = new AbortController();
-          // sin lang: Photon solo soporta default/de/en/fr; 'default' devuelve los nombres locales
-          const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q + ', ' + selC.value)}&limit=6&lat=${clat}&lon=${clng}`;
+          // sin lang (Photon solo soporta default/de/en/fr) y con bbox de
+          // ~25 km alrededor de la ciudad: sin él, el sesgo por lat/lon no
+          // impide resultados de otras ciudades o países.
+          const D = 0.22;
+          const bbox = `${clng - D},${clat - D},${clng + D},${clat + D}`;
+          const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(normalizarDir(q) + ', ' + ciudad)}&limit=8&lat=${clat}&lon=${clng}&bbox=${bbox}`;
           const res = await fetch(url, {signal: ctrl.signal});
           if (!res.ok) throw new Error('geocoder');
-          pintarSug((await res.json()).features || []);
+          let feats = (await res.json()).features || [];
+          // la ciudad elegida primero; lo demás del bbox (municipios vecinos) después
+          feats.sort((a, b) => ((b.properties?.city === ciudad) ? 1 : 0) - ((a.properties?.city === ciudad) ? 1 : 0));
+          pintarSug(feats.slice(0, 6));
         } catch(e) { cerrarSug(); }
       }, 350);
     });

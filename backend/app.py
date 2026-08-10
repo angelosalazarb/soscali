@@ -97,6 +97,31 @@ CREATE TABLE IF NOT EXISTS accesos_telefono (
   user_agent         TEXT,
   creado_en          TEXT DEFAULT (datetime('now'))
 );
+
+-- Caché de geocoding: cada consulta resuelta (TomTom o Photon) se guarda y
+-- las repeticiones salen de aquí sin gastar cuota externa.
+CREATE TABLE IF NOT EXISTS geocache (
+  clave      TEXT PRIMARY KEY,             -- ciudad|consulta_normalizada
+  resultados TEXT NOT NULL,                -- JSON [{principal,secundario,lat,lng}]
+  fuente     TEXT,                         -- tomtom | photon
+  creado_en  TEXT DEFAULT (datetime('now'))
+);
+
+-- Directorio comunitario: direcciones confirmadas por reportantes (pin
+-- ajustado a mano). Se ofrecen de primeras en el autocompletado, gratis.
+CREATE TABLE IF NOT EXISTS direcciones_conocidas (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  departamento   TEXT NOT NULL,
+  ciudad         TEXT NOT NULL,
+  direccion      TEXT NOT NULL,            -- como la escribió la persona
+  direccion_norm TEXT NOT NULL,            -- normalizada en minúsculas, para buscar
+  lat            REAL NOT NULL,
+  lng            REAL NOT NULL,
+  veces          INTEGER DEFAULT 1,
+  actualizado_en TEXT DEFAULT (datetime('now')),
+  UNIQUE(ciudad, direccion_norm)
+);
+CREATE INDEX IF NOT EXISTS idx_dircon ON direcciones_conocidas(ciudad, direccion_norm);
 """
 
 
@@ -125,6 +150,8 @@ def init_db() -> None:
             # el RENAME se llevó los índices idx_rep_* y el DROP los eliminó:
             # segunda pasada del SCHEMA para recrearlos sobre la tabla nueva
             conn.executescript(SCHEMA)
+        # el caché de geocoding no necesita vivir para siempre
+        conn.execute("DELETE FROM geocache WHERE creado_en < datetime('now','-90 days')")
 
 
 init_db()
@@ -417,6 +444,19 @@ def crear_reporte():
                 " VALUES (:id, :tipo, :departamento, :ciudad, :direccion, :lat, :lng,"
                 " :ubicacion_ajustada, :descripcion, :extras, :telefono_contacto, :canal, :fotos)",
                 fila)
+            # directorio comunitario: solo direcciones con pin ajustado a mano
+            # (las de centroide contaminarían el directorio con puntos genéricos)
+            if fila["direccion"] and fila["ubicacion_ajustada"]:
+                conn.execute(
+                    "INSERT INTO direcciones_conocidas"
+                    " (departamento, ciudad, direccion, direccion_norm, lat, lng)"
+                    " VALUES (?,?,?,?,?,?)"
+                    " ON CONFLICT(ciudad, direccion_norm) DO UPDATE SET"
+                    " veces=veces+1, lat=excluded.lat, lng=excluded.lng,"
+                    " actualizado_en=datetime('now')",
+                    (fila["departamento"], fila["ciudad"], fila["direccion"],
+                     _normalizar_direccion(fila["direccion"]).lower(),
+                     fila["lat"], fila["lng"]))
     except sqlite3.IntegrityError:
         # reintento de la cola offline: el servidor ya lo tiene → el cliente lo desencola
         return jsonify({"ok": True, "duplicado": True}), 409
@@ -556,6 +596,10 @@ def _buscar_photon(q: str, ciudad: str, lat: float, lng: float) -> list[dict]:
 
 @app.get("/api/direcciones")
 def buscar_direcciones():
+    """Tres niveles, del más barato al más caro:
+    1. direcciones_conocidas — confirmadas por reportantes (gratis, propio)
+    2. geocache — consultas ya resueltas antes (gratis, propio)
+    3. TomTom → Photon — solo si la consulta nunca se ha hecho"""
     if not _rate_ok(f"dir:{_ip()}", maximo=30, ventana_seg=60):
         return jsonify([]), 429
     q = _texto(request.args.get("q"), 120)
@@ -564,18 +608,55 @@ def buscar_direcciones():
     if len(q) < 3 or not catalogo.ciudad_valida(depto, ciudad):
         return jsonify([])
     lat, lng = catalogo.centroide(depto, ciudad)
-    qn = _normalizar_direccion(q)
-    if TOMTOM_KEY:
-        try:
-            res = _buscar_tomtom(qn, ciudad, lat, lng)
-            if res:
-                return jsonify(res)
-        except requests.RequestException:
-            pass  # TomTom caído o sin cuota: probar Photon
-    try:
-        return jsonify(_buscar_photon(qn, ciudad, lat, lng))
-    except requests.RequestException:
-        return jsonify([])
+    qn = _normalizar_direccion(q).lower()
+    clave = f"{ciudad}|{qn}"
+
+    with db() as conn:
+        locales = [
+            {"principal": f["direccion"], "secundario": f"Usada en reportes · {ciudad}",
+             "lat": f["lat"], "lng": f["lng"]}
+            for f in conn.execute(
+                "SELECT direccion, lat, lng FROM direcciones_conocidas"
+                " WHERE ciudad=? AND direccion_norm LIKE ?"
+                " ORDER BY veces DESC, actualizado_en DESC LIMIT 3",
+                (ciudad, qn + "%")).fetchall()]
+        cacheada = conn.execute("SELECT resultados FROM geocache WHERE clave=?",
+                                (clave,)).fetchone()
+
+    if cacheada:
+        externos = json.loads(cacheada["resultados"])
+    else:
+        externos, fuente = None, None
+        if TOMTOM_KEY:
+            try:
+                externos, fuente = _buscar_tomtom(qn, ciudad, lat, lng), "tomtom"
+            except requests.RequestException:
+                externos = None  # TomTom caído o sin cuota: probar Photon
+        if not externos:
+            try:
+                externos, fuente = _buscar_photon(qn, ciudad, lat, lng), "photon"
+            except requests.RequestException:
+                externos = None
+        if externos is None:
+            externos = []
+        else:
+            # también se cachean respuestas vacías: repetir una búsqueda sin
+            # resultados gastaría cuota igual
+            with db() as conn:
+                conn.execute(
+                    "INSERT INTO geocache (clave, resultados, fuente) VALUES (?,?,?)"
+                    " ON CONFLICT(clave) DO UPDATE SET resultados=excluded.resultados,"
+                    " fuente=excluded.fuente, creado_en=datetime('now')",
+                    (clave, json.dumps(externos, ensure_ascii=False), fuente))
+
+    # locales primero, externos después, sin puntos duplicados
+    vistos = {(round(s["lat"], 5), round(s["lng"], 5)) for s in locales}
+    for e in externos:
+        marca = (round(e["lat"], 5), round(e["lng"], 5))
+        if marca not in vistos:
+            vistos.add(marca)
+            locales.append(e)
+    return jsonify(locales[:6])
 
 
 @app.get("/api/reportes/<rid>/foto")

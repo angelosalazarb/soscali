@@ -862,13 +862,32 @@ const Stepper = (function(){
           let feats = (await res.json()).features || [];
           // la ciudad elegida primero; lo demás del bbox (municipios vecinos) después
           feats.sort((a, b) => ((b.properties?.city === ciudad) ? 1 : 0) - ((a.properties?.city === ciudad) ? 1 : 0));
-          pintarSug(feats.slice(0, 6));
-        } catch(e) { cerrarSug(); }
+          pintarSug(feats.slice(0, 5), q);
+        } catch(e) {
+          if (e.name !== 'AbortError') pintarSug([], q);   // sin geocoder: al menos la opción manual
+        }
       }, 350);
     });
-    function pintarSug(feats){
+    function pintarSug(feats, q){
       caja.innerHTML = '';
-      if (!feats.length) { cerrarSug(); return; }
+      // Primera opción SIEMPRE: usar la dirección tal como se escribió. OSM no
+      // tiene todos los predios; nadie debe quedar bloqueado por el geocoder.
+      // El punto aproximado es el del mejor resultado de la zona (o el pin
+      // actual, que arranca en el centro de la ciudad).
+      const manual = document.createElement('button');
+      manual.type = 'button'; manual.className = 'sugerencia'; manual.setAttribute('role','option');
+      manual.innerHTML = `Usar “${esc(q)}”<small>Pin aproximado en la zona — muévelo al punto exacto si puedes</small>`;
+      manual.addEventListener('click', () => {
+        cerrarSug();
+        if (st.pin) {
+          if (feats.length) {
+            const [lng0, lat0] = feats[0].geometry.coordinates;
+            st.pin.setLatLng([lat0, lng0]);
+          }
+          st.mapa.setView(st.pin.getLatLng(), 16);
+        }
+      });
+      caja.appendChild(manual);
       feats.forEach(f => {
         const p = f.properties || {};
         const principal = p.name || [p.street, p.housenumber].filter(Boolean).join(' ') || 'Punto en el mapa';

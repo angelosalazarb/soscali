@@ -60,7 +60,7 @@ app = Flask(__name__)
 # la foto viaja en el JSON como base64 (~1.4x su peso real); tope de seguridad
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 
-TIPOS = ("dano", "desaparecido", "donacion", "hospital")
+TIPOS = ("dano", "desaparecido", "donacion", "hospital", "mascota")
 SEVERIDADES = ("leve", "moderado", "grave", "colapso")
 NECESIDADES = ("agua", "alimentos", "medicamentos", "ropa", "cobijas", "aseo", "otros")
 TIPOS_AYUDA = ("herramientas", "maquinaria", "personas")
@@ -70,7 +70,7 @@ TIPOS_AYUDA = ("herramientas", "maquinaria", "personas")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reportes (
   id                 TEXT PRIMARY KEY,          -- UUID generado en el cliente (idempotencia de la cola offline)
-  tipo               TEXT NOT NULL CHECK (tipo IN ('dano','desaparecido','donacion','hospital')),
+  tipo               TEXT NOT NULL CHECK (tipo IN ('dano','desaparecido','donacion','hospital','mascota')),
   departamento       TEXT NOT NULL,
   ciudad             TEXT NOT NULL,
   direccion          TEXT,
@@ -160,7 +160,7 @@ def init_db() -> None:
             conn.execute("ALTER TABLE reportes ADD COLUMN confirmaciones INTEGER DEFAULT 1")
         sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table'"
                            " AND name='reportes'").fetchone()[0]
-        if "'hospital'" not in sql:
+        if "'mascota'" not in sql:
             # por columnas NOMBRADAS: el orden físico de una base migrada con
             # ALTER no coincide con el del SCHEMA y un SELECT * posicional
             # cruzaría los datos
@@ -332,6 +332,27 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
             extras["edad"] = edad
         if extras_in.get("descripcion_fisica"):
             extras["descripcion_fisica"] = _texto(extras_in["descripcion_fisica"], 500)
+        telefono = _texto(data.get("telefono_contacto"), 30)
+        if len("".join(c for c in telefono if c.isdigit())) < 7:
+            return None, "El teléfono de contacto es obligatorio (mínimo 7 dígitos)"
+
+    elif tipo == "mascota":
+        # mascota perdida: mismo esquema que desaparecidos (foto + teléfono
+        # protegido con "Tengo información")
+        especie = _texto(extras_in.get("especie"), 30)
+        desc_fisica = _texto(extras_in.get("descripcion_fisica"), 500)
+        visto = _texto(extras_in.get("visto_ultima_vez"), 200)
+        if not especie:
+            return None, "Indica qué tipo de animal es"
+        if not desc_fisica or not visto:
+            return None, "La descripción y dónde se perdió son obligatorios"
+        extras["especie"] = especie
+        extras["descripcion_fisica"] = desc_fisica
+        extras["visto_ultima_vez"] = visto
+        if extras_in.get("nombre_mascota"):
+            extras["nombre_mascota"] = _texto(extras_in["nombre_mascota"], 60)
+        if extras_in.get("raza"):
+            extras["raza"] = _texto(extras_in["raza"], 60)
         telefono = _texto(data.get("telefono_contacto"), 30)
         if len("".join(c for c in telefono if c.isdigit())) < 7:
             return None, "El teléfono de contacto es obligatorio (mínimo 7 dígitos)"
@@ -555,7 +576,7 @@ def contacto_desaparecido(rid):
     data = request.get_json(silent=True) or {}
     with db() as conn:
         f = conn.execute("SELECT telefono_contacto FROM reportes"
-                         " WHERE id=? AND tipo IN ('desaparecido','hospital')"
+                         " WHERE id=? AND tipo IN ('desaparecido','hospital','mascota')"
                          " AND estado='visible'",
                          (rid,)).fetchone()
         if not f or not f["telefono_contacto"]:
@@ -750,6 +771,7 @@ def reportes_similares():
     ciudad = _texto(request.args.get("ciudad"), 60)
     nombre = _texto(request.args.get("nombre"), 120)
     sexo = _texto(request.args.get("sexo"), 20)
+    especie = _texto(request.args.get("especie"), 30)
     try:
         edad = int(request.args.get("edad"))
     except (TypeError, ValueError):
@@ -780,6 +802,13 @@ def reportes_similares():
             # solo por nombre: dos personas distintas pueden llamarse igual,
             # pero eso lo decide quien reporta viendo la tarjeta (y la foto)
             es = _parecido(nombre, ex.get("nombre", "")) >= 0.72
+        elif tipo == "mascota":
+            # los nombres de mascota se repiten mucho (Max, Luna): exige
+            # además misma especie o cercanía del punto de pérdida
+            mismo_animal = (not especie or not ex.get("especie")
+                            or _parecido(especie, ex["especie"]) >= 0.8)
+            es = mismo_animal and (_parecido(nombre, ex.get("nombre_mascota", "")) >= 0.8
+                                   or (cerca and not nombre))
         else:  # hospital: mismo hospital + paciente compatible
             es = (_parecido(nombre, ex.get("hospital", "")) >= 0.75
                   and (not sexo or not ex.get("sexo") or sexo == ex["sexo"])
@@ -903,7 +932,8 @@ def admin_accesos():
         d = dict(f)
         extras = json.loads(d.pop("reporte_extras") or "{}")
         # nombre del desaparecido, o del hospital si es un paciente sin identificar
-        d["desaparecido"] = extras.get("nombre") or extras.get("hospital", "")
+        d["desaparecido"] = (extras.get("nombre") or extras.get("hospital")
+                             or extras.get("nombre_mascota", ""))
         out.append(d)
     return jsonify(out)
 
@@ -921,7 +951,8 @@ def admin_exportar():
                      "descripcion_fisica", "visto_ultima_vez", "nombre_punto",
                      "necesidades", "horario", "hospital", "reportante_nombre",
                      "reportante_cargo", "sexo", "edad_aprox", "estado_salud",
-                     "senas_particulares", "ropa", "fecha_ingreso"]
+                     "senas_particulares", "ropa", "fecha_ingreso",
+                     "nombre_mascota", "especie", "raza"]
     w = csv.writer(buf, delimiter=";")  # ';' — Excel es-CO
     w.writerow(["id", "tipo", "departamento", "ciudad", "direccion", "lat", "lng",
                 "ubicacion_ajustada", "descripcion", "telefono_contacto", "estado",

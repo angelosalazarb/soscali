@@ -277,6 +277,7 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
     <button class="chip" data-tipo="dano" aria-pressed="false">Daños</button>
     <button class="chip" data-tipo="desaparecido,hospital" aria-pressed="false">Desaparecidos</button>
     <button class="chip" data-tipo="donacion" aria-pressed="false">Donaciones</button>
+    <button class="chip" data-tipo="mascota" aria-pressed="false">Mascotas</button>
   </div>
   <div class="filtros-fila">
     <select id="filtro-depto" aria-label="Filtrar por departamento"><option value="">Departamento: todos</option></select>
@@ -360,6 +361,7 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
   <div class="chips" id="tabs-des" role="tablist" aria-label="Tipo de reporte">
     <button class="chip" role="tab" data-tab="familia" aria-pressed="true">Busco a mi familiar</button>
     <button class="chip" role="tab" data-tab="hospital" aria-pressed="false">Soy hospital: paciente sin identificar</button>
+    <button class="chip" role="tab" data-tab="mascota" aria-pressed="false">Mascota perdida</button>
   </div>
 
   <div id="tab-familia">
@@ -467,6 +469,56 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
     <div class="paso"><button type="submit" class="btn primario bloque">Registrar paciente sin identificar</button></div>
   </form>
   <div class="form-exito oculto" id="exito-hospital"></div>
+  </div>
+
+  <div id="tab-mascota" class="oculto">
+  <form id="form-mascota" novalidate>
+    <p class="ayuda" style="margin-top:12px">Reporta una mascota que se perdió durante el sismo, o una que
+    encontraste y estás cuidando, para reencontrarla con su familia.</p>
+
+    <div class="paso" data-stepper="mascota"></div>
+
+    <label>¿Qué animal es? <span class="req" aria-hidden="true">*</span></label>
+    <div class="chips" id="mas-especie" role="group" aria-label="Tipo de animal">
+      <button type="button" class="chip" data-valor="perro" aria-pressed="false">Perro</button>
+      <button type="button" class="chip" data-valor="gato" aria-pressed="false">Gato</button>
+      <button type="button" class="chip" data-valor="ave" aria-pressed="false">Ave</button>
+      <button type="button" class="chip" data-valor="otro" aria-pressed="false">Otro</button>
+    </div>
+    <p class="error-campo" id="err-mas-especie">Indica qué tipo de animal es.</p>
+
+    <label for="mas-nombre">Nombre de la mascota</label>
+    <input type="text" id="mas-nombre" maxlength="60" placeholder="Ej.: Max, Luna…">
+
+    <label for="mas-raza">Raza</label>
+    <input type="text" id="mas-raza" maxlength="60" placeholder="Ej.: criollo, labrador…">
+
+    <label for="mas-fisica">Descripción (color, tamaño, collar, señas) <span class="req" aria-hidden="true">*</span></label>
+    <textarea id="mas-fisica" maxlength="500" placeholder="Ej.: perro mediano café con blanco, collar rojo con placa…" required></textarea>
+    <p class="error-campo" id="err-mas-fisica">Describe la mascota.</p>
+
+    <label for="mas-foto">Foto de la mascota</label>
+    <input type="file" id="mas-foto" accept="image/*">
+    <p class="ayuda">La foto es lo que más ayuda a reconocerla. Se comprime automáticamente.</p>
+    <div id="mas-foto-prev"></div>
+
+    <label for="mas-visto">¿Dónde y cuándo se perdió (o la encontraste)? <span class="req" aria-hidden="true">*</span></label>
+    <input type="text" id="mas-visto" maxlength="200" placeholder="Ej.: barrio Obrero, 10 ago en la noche" required>
+    <p class="error-campo" id="err-mas-visto">Indica dónde y cuándo.</p>
+
+    <label for="mas-tel">Teléfono de contacto <span class="req" aria-hidden="true">*</span></label>
+    <input type="tel" id="mas-tel" maxlength="30" inputmode="tel" autocomplete="tel" placeholder="Ej.: 300 123 4567" required>
+    <p class="error-campo" id="err-mas-tel">Escribe un teléfono válido (mínimo 7 dígitos).</p>
+    <div class="nota-privacidad">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <span>Este número <strong>no se publica</strong>: solo se muestra a quien pulse
+      "Tengo información" en el detalle, y cada consulta queda registrada.</span>
+    </div>
+
+    <input class="honeypot" type="text" name="sitio_web" tabindex="-1" autocomplete="off" aria-hidden="true">
+    <div class="paso"><button type="submit" class="btn primario bloque">Reportar mascota</button></div>
+  </form>
+  <div class="form-exito oculto" id="exito-mascota"></div>
   </div>
 </section>
 
@@ -595,6 +647,7 @@ const TIPO_META = {
   desaparecido: {nombre:'Persona desaparecida', color:'#271d67'},
   donacion:     {nombre:'Punto de donación',  color:'#00332a'},
   hospital:     {nombre:'Paciente sin identificar', color:'#271d67'},
+  mascota:      {nombre:'Mascota perdida', color:'#3d2e8a'},
 };
 const ESTADO_SALUD = {consciente:'Consciente', inconsciente:'Inconsciente', estable:'Estable', delicado:'Delicado', uci:'En UCI'};
 const SEV_COLOR = {leve:'#075d4d', moderado:'#bc6e56', grave:'#692a27', colapso:'#692a27'};
@@ -607,6 +660,7 @@ const ICONO = {
   desaparecido: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
   donacion: '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.51 4.04 3 5.5l7 7Z"/>',
   hospital: '<path d="M11 3a1 1 0 0 0-1 1v5H5a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h5v5a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-5h5a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1h-5V4a1 1 0 0 0-1-1h-2Z"/>',
+  mascota: '<circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="20" cy="16" r="2"/><path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 17.48 4.46 16.84A3.5 3.5 0 0 1 5.5 10Z"/>',
 };
 function svgIcono(tipo, color, tam=18){
   return `<svg width="${tam}" height="${tam}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONO[tipo]}</svg>`;
@@ -719,7 +773,8 @@ function montarFoto(inputSel, prevSel){
 
 /* ═══ Título legible de un reporte (lista, detalle y similares) ═══ */
 function tituloReporte(r){
-  return r.tipo === 'desaparecido' ? (r.extras.nombre || 'Persona desaparecida')
+  return r.tipo === 'mascota' ? `${r.extras.nombre_mascota || 'Mascota'} — ${r.extras.especie || 'perdida'}`
+       : r.tipo === 'desaparecido' ? (r.extras.nombre || 'Persona desaparecida')
        : r.tipo === 'hospital' ? `Paciente sin identificar — ${r.extras.hospital || 'hospital'}`
        : r.tipo === 'donacion' ? (r.extras.nombre_punto || 'Punto de donación')
        : `Daño ${SEV_NOMBRE[r.extras.severidad] || ''}`.trim();
@@ -740,9 +795,10 @@ const Similares = (function(){
     try {
       const p = new URLSearchParams({tipo: payload.tipo, ciudad: payload.ciudad,
                                      lat: payload.lat, lng: payload.lng});
-      const nom = payload.extras?.nombre || payload.extras?.nombre_punto || payload.extras?.hospital || '';
+      const nom = payload.extras?.nombre || payload.extras?.nombre_punto || payload.extras?.hospital || payload.extras?.nombre_mascota || '';
       if (nom) p.set('nombre', nom);
       if (payload.extras?.sexo) p.set('sexo', payload.extras.sexo);
+      if (payload.extras?.especie) p.set('especie', payload.extras.especie);
       if (payload.extras?.edad_aprox != null) p.set('edad', payload.extras.edad_aprox);
       const res = await fetch('/api/reportes/similares?' + p.toString());
       if (res.ok) candidatos = await res.json();
@@ -777,7 +833,7 @@ const Similares = (function(){
 const TITULOS = {
   mapa: ['Mapa de afectaciones', 'Reportes ciudadanos en toda Colombia'],
   danos: ['Reportar daño estructural', 'Ubica el lugar y describe el daño. Si hay personas atrapadas llama primero al 123.'],
-  desaparecidos: ['Desaparecidos', 'Personas buscadas por su familia y pacientes sin identificar reportados por hospitales.'],
+  desaparecidos: ['Desaparecidos', 'Personas buscadas por su familia, pacientes sin identificar en hospitales y mascotas perdidas.'],
   donaciones: ['Punto de donación', 'Registra dónde se reciben donaciones y qué insumos se necesitan.'],
 };
 function ruta(){
@@ -796,7 +852,8 @@ function navegar(){
   $('#sub-vista').textContent = TITULOS[v][1];
   if (v === 'mapa') setTimeout(() => Mapa.asegurar(), 30);
   else if (v === 'desaparecidos')
-    Stepper.asegurar($('#tab-hospital').classList.contains('oculto') ? 'desaparecido' : 'hospital');
+    Stepper.asegurar(!$('#tab-hospital').classList.contains('oculto') ? 'hospital'
+                   : !$('#tab-mascota').classList.contains('oculto') ? 'mascota' : 'desaparecido');
   else Stepper.asegurar(v === 'danos' ? 'dano' : 'donacion');
   document.querySelector('main').focus?.();
 }
@@ -861,10 +918,7 @@ const Mapa = (function(){
     reportes.forEach(r => {
       const el = document.createElement('div');
       el.className = 'card item-reporte'; el.setAttribute('role','listitem'); el.tabIndex = 0;
-      const titulo = r.tipo === 'desaparecido' ? (r.extras.nombre || 'Persona desaparecida')
-                   : r.tipo === 'hospital' ? `Paciente sin identificar — ${r.extras.hospital || 'hospital'}`
-                   : r.tipo === 'donacion' ? (r.extras.nombre_punto || 'Punto de donación')
-                   : `Daño ${SEV_NOMBRE[r.extras.severidad] || ''}`.trim();
+      const titulo = tituloReporte(r);
       // qué se necesita, visible desde la lista sin abrir el detalle
       let necesita = '';
       if (r.tipo === 'donacion' && (r.extras.necesidades || []).length)
@@ -890,6 +944,7 @@ const Mapa = (function(){
         <div class="metrica"><span class="valor">${m.por_tipo.desaparecido}</span><span class="nombre">${svgIcono('desaparecido','#271d67',14)} Desaparecidos</span></div>
         <div class="metrica"><span class="valor">${m.por_tipo.hospital || 0}</span><span class="nombre">${svgIcono('hospital','#271d67',14)} Sin identificar (hospitales)</span></div>
         <div class="metrica"><span class="valor">${m.por_tipo.donacion}</span><span class="nombre">${svgIcono('donacion','#00332a',14)} Puntos de donación</span></div>
+        <div class="metrica"><span class="valor">${m.por_tipo.mascota || 0}</span><span class="nombre">${svgIcono('mascota','#3d2e8a',14)} Mascotas perdidas</span></div>
         <div class="metrica"><span class="valor">${m.ultimas_24h}</span><span class="nombre">Últimas 24 horas</span></div>`;
     } catch(e) { /* métricas no críticas */ }
   }
@@ -959,11 +1014,13 @@ const Detalle = (function(){
       <h3 id="sheet-titulo" style="font-family:var(--serif);font-weight:400;font-size:20px">${
         esc(r.tipo === 'desaparecido' ? (r.extras.nombre || '—')
           : r.tipo === 'hospital' ? (r.extras.hospital || 'Hospital')
+          : r.tipo === 'mascota' ? (r.extras.nombre_mascota || 'Mascota perdida')
           : r.tipo === 'donacion' ? (r.extras.nombre_punto || 'Punto de donación')
           : (r.ciudad + ' — daño ' + (SEV_NOMBRE[r.extras.severidad]||'').toLowerCase()))}</h3></div></div>`;
     if (r.fotos) {
       const altFoto = {dano:'Foto del daño', donacion:'Foto o flyer del punto de donación',
-                       desaparecido:'Foto de la persona', hospital:'Foto del paciente'}[r.tipo] || 'Foto del reporte';
+                       desaparecido:'Foto de la persona', hospital:'Foto del paciente',
+                       mascota:'Foto de la mascota'}[r.tipo] || 'Foto del reporte';
       html += `<img src="/api/reportes/${encodeURIComponent(r.id)}/foto" alt="${altFoto}"
         style="width:100%;max-height:320px;object-fit:contain;background:var(--faint);border-radius:14px;border:1px solid var(--border);margin-top:12px" loading="lazy">`;
     }
@@ -980,6 +1037,11 @@ const Detalle = (function(){
       html += fila('Edad aproximada', r.extras.edad != null ? r.extras.edad + ' años' : '')
             + fila('Descripción', r.extras.descripcion_fisica)
             + fila('Visto por última vez', r.extras.visto_ultima_vez);
+    }
+    if (r.tipo === 'mascota') {
+      html += fila('Animal', [r.extras.especie, r.extras.raza].filter(Boolean).join(' · '))
+            + fila('Descripción', r.extras.descripcion_fisica)
+            + fila('Se perdió', r.extras.visto_ultima_vez);
     }
     if (r.tipo === 'hospital') {
       const sexo = r.extras.sexo ? r.extras.sexo.charAt(0).toUpperCase() + r.extras.sexo.slice(1) : '';
@@ -1007,6 +1069,10 @@ const Detalle = (function(){
     if (r.tipo === 'hospital') {
       html += `<button class="btn primario bloque" style="margin-top:14px" id="btn-tengo-info">
         ${svgIcono('hospital','currentColor',18)} Es mi familiar — ver teléfono del hospital</button>`;
+    }
+    if (r.tipo === 'mascota') {
+      html += `<button class="btn primario bloque" style="margin-top:14px" id="btn-tengo-info">
+        ${svgIcono('mascota','currentColor',18)} Tengo información</button>`;
     }
     $('#sheet-contenido').innerHTML = html;
     $('#sheet').classList.add('visible'); $('#sheet-fondo').classList.add('visible');
@@ -1094,7 +1160,7 @@ const Stepper = (function(){
         st.pin = L.marker([lat,lng], {
           draggable:true, autoPan:true,
           icon: L.divIcon({className:'', iconSize:[34,34], iconAnchor:[17,17],
-            html:`<div class="pin-sos" style="background:#271d67">${svgIcono('dano'===id?'dano':id==='desaparecido'?'desaparecido':'donacion','#fff',17)}</div>`}),
+            html:`<div class="pin-sos" style="background:#271d67">${svgIcono(ICONO[id] ? id : 'dano','#fff',17)}</div>`}),
         }).addTo(st.mapa);
         st.pin.on('dragend', () => { st.ajustada = true; });
       } else { st.mapa.setView([lat,lng], 14); st.pin.setLatLng([lat,lng]); }
@@ -1372,13 +1438,13 @@ $('#form-desaparecido').addEventListener('submit', async e => {
 });
 
 /* ═══ Pestañas de Desaparecidos (familia / hospital) ═══ */
+const TAB_STEPPER = {familia: 'desaparecido', hospital: 'hospital', mascota: 'mascota'};
 $('#tabs-des').addEventListener('click', e => {
   const btn = e.target.closest('[data-tab]'); if (!btn) return;
   $$('#tabs-des .chip').forEach(c => c.setAttribute('aria-pressed', c === btn ? 'true' : 'false'));
-  const esHospital = btn.dataset.tab === 'hospital';
-  $('#tab-familia').classList.toggle('oculto', esHospital);
-  $('#tab-hospital').classList.toggle('oculto', !esHospital);
-  Stepper.asegurar(esHospital ? 'hospital' : 'desaparecido');
+  for (const t of Object.keys(TAB_STEPPER))
+    $(`#tab-${t}`).classList.toggle('oculto', t !== btn.dataset.tab);
+  Stepper.asegurar(TAB_STEPPER[btn.dataset.tab]);
 });
 
 /* ═══ Formulario: paciente sin identificar (hospital) ═══ */
@@ -1430,6 +1496,47 @@ $('#form-hospital').addEventListener('submit', async e => {
   Stepper.reset('hospital'); fotoHos.reset();
   pantallaExito('#exito-hospital', '#form-hospital',
     estado === 'enviado' ? 'Paciente registrado' : 'Registro en cola de envío');
+});
+
+/* ═══ Formulario: mascota perdida ═══ */
+const leerEspecie = chipUnico('#mas-especie');
+const fotoMas = montarFoto('#mas-foto', '#mas-foto-prev');
+$('#form-mascota').addEventListener('submit', async e => {
+  e.preventDefault();
+  const ubic = Stepper.leer('mascota'); if (!ubic) return;
+  let ok = true;
+  const especie = leerEspecie();
+  const fisica = $('#mas-fisica').value.trim();
+  const visto = $('#mas-visto').value.trim();
+  const tel = $('#mas-tel').value.trim();
+  $('#err-mas-especie').classList.toggle('visible', !especie); if (!especie) ok = false;
+  $('#err-mas-fisica').classList.toggle('visible', !fisica); if (!fisica) ok = false;
+  $('#err-mas-visto').classList.toggle('visible', !visto); if (!visto) ok = false;
+  const telOk = (tel.replace(/\D/g,'').length >= 7);
+  $('#err-mas-tel').classList.toggle('visible', !telOk); if (!telOk) ok = false;
+  if (!ok) return;
+  const payload = {
+    id: crypto.randomUUID(), tipo: 'mascota', ...ubic,
+    telefono_contacto: tel,
+    foto: fotoMas.valor(),
+    extras: { especie, descripcion_fisica: fisica, visto_ultima_vez: visto,
+              nombre_mascota: $('#mas-nombre').value.trim(),
+              raza: $('#mas-raza').value.trim() },
+    sitio_web: e.target.querySelector('.honeypot').value,
+  };
+  const btn = e.target.querySelector('[type="submit"]'); btn.disabled = true;
+  const sim = await Similares.revisar(payload);
+  if (sim.accion === 'confirmado') {
+    btn.disabled = false; Stepper.reset('mascota'); fotoMas.reset();
+    pantallaExito('#exito-mascota', '#form-mascota',
+      `Confirmado — ${sim.confirmaciones} personas han reportado esta mascota`);
+    return;
+  }
+  const estado = await enviarReporte(payload); btn.disabled = false;
+  if (estado === 'error') return;
+  Stepper.reset('mascota'); fotoMas.reset();
+  pantallaExito('#exito-mascota', '#form-mascota',
+    estado === 'enviado' ? 'Mascota reportada' : 'Reporte en cola de envío');
 });
 
 /* ═══ Formulario: donaciones ═══ */

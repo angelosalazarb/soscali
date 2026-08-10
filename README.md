@@ -16,9 +16,12 @@ Decisiones clave:
 
 - **Cola offline:** los reportes se guardan en `localStorage` y se reenvían
   solos al volver la conexión (`POST /api/reportes` es idempotente por UUID).
-- **Sin geocoding externo:** departamento → ciudad (centroide local) → pin
-  arrastrable. Leaflet va vendorizado; solo los tiles de OSM son externos y
-  hay vista de lista como fallback.
+- **Geocoding con degradación elegante:** departamento → ciudad (centroide
+  local) → autocompletado de dirección vía Photon (geocoder abierto de OSM,
+  sin llave) que ubica el pin solo; si no hay red o el geocoder falla, queda
+  el flujo manual (pin arrastrable) sin romper nada. Leaflet va vendorizado;
+  los únicos servicios externos son los tiles de OSM (fallback: vista de
+  lista) y Photon (fallback: pin manual).
 - **Publicación inmediata + moderación:** todo reporte sale al mapa al
   instante; `/admin` (JWT + solo por VPN en producción) permite ocultar o
   eliminar falsos (soft delete).

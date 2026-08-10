@@ -162,6 +162,23 @@ def _texto(valor, maximo: int) -> str:
     return str(valor or "").strip()[:maximo]
 
 
+def _lista_abierta(valores, conocidos: tuple[str, ...], maximo: int = 8) -> list[str]:
+    """Normaliza una lista de etiquetas SIN descartar las desconocidas: pueden
+    venir con errores de escritura (o del futuro ingest por WhatsApp) y en una
+    emergencia es peor perder la información que tenerla imperfecta. Las
+    conocidas van primero en su orden canónico; el resto se conserva como
+    texto saneado, sin duplicados."""
+    if not isinstance(valores, list):
+        return []
+    con = [v for v in valores if v in conocidos]
+    otras = []
+    for v in valores:
+        t = _texto(v, 40)
+        if t and v not in conocidos and t not in otras:
+            otras.append(t)
+    return (sorted(set(con), key=conocidos.index) + otras)[:maximo]
+
+
 def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
     """Devuelve (fila_lista_para_insertar, None) o (None, motivo de rechazo)."""
     if not isinstance(data, dict):
@@ -207,11 +224,9 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
         # ayuda en el lugar: qué se necesita para atender el daño
         if extras_in.get("necesita_ayuda"):
             extras["necesita_ayuda"] = True
-            tipos = extras_in.get("ayuda_tipos")
-            if isinstance(tipos, list):
-                tipos = [t for t in tipos if t in TIPOS_AYUDA]
-                if tipos:
-                    extras["ayuda_tipos"] = sorted(set(tipos), key=TIPOS_AYUDA.index)
+            tipos = _lista_abierta(extras_in.get("ayuda_tipos"), TIPOS_AYUDA)
+            if tipos:
+                extras["ayuda_tipos"] = tipos
             if extras_in.get("ayuda_detalle"):
                 extras["ayuda_detalle"] = _texto(extras_in["ayuda_detalle"], 500)
 
@@ -237,13 +252,12 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
             return None, "El teléfono de contacto es obligatorio (mínimo 7 dígitos)"
 
     elif tipo == "donacion":
-        pedidas = extras_in.get("necesidades")
-        if not isinstance(pedidas, list):
+        if not isinstance(extras_in.get("necesidades"), list):
             return None, "necesidades debe ser una lista"
-        necesidades = [n for n in pedidas if n in NECESIDADES]
+        necesidades = _lista_abierta(extras_in["necesidades"], NECESIDADES)
         if not necesidades:
             return None, "Indica al menos un insumo necesario"
-        extras["necesidades"] = sorted(set(necesidades), key=NECESIDADES.index)
+        extras["necesidades"] = necesidades
         if extras_in.get("nombre_punto"):
             extras["nombre_punto"] = _texto(extras_in["nombre_punto"], 120)
         if extras_in.get("horario"):

@@ -172,6 +172,21 @@ label .req{color:var(--error)}
 }
 .chip-grande[aria-pressed="true"]{border-color:var(--indigo);background:var(--indigo-dim);color:var(--indigo);font-weight:600}
 .mini-mapa{height:230px;border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;margin-top:8px;background:var(--faint)}
+.autocompletar{position:relative}
+.sugerencias{
+  display:none;position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:950;
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  box-shadow:0 8px 24px rgba(26,23,20,.18);overflow:hidden;max-height:260px;overflow-y:auto;
+}
+.sugerencias.visible{display:block}
+.sugerencia{
+  display:block;width:100%;text-align:left;background:none;border:none;cursor:pointer;
+  padding:12px 16px;font-family:var(--sans);font-size:14.5px;color:var(--tinta);
+  border-bottom:1px solid var(--faint);min-height:44px;
+}
+.sugerencia:last-child{border-bottom:none}
+.sugerencia:hover,.sugerencia:focus{background:var(--indigo-dim)}
+.sugerencia small{display:block;color:var(--muted);font-size:12.5px}
 .form-exito{text-align:center;padding:34px 20px}
 .form-exito .circulo{width:72px;height:72px;border-radius:50%;background:rgba(7,93,77,.1);display:grid;place-items:center;margin:0 auto 14px;color:var(--esmeralda)}
 .honeypot{position:absolute;left:-9999px;top:-9999px;height:1px;width:1px;overflow:hidden}
@@ -770,9 +785,12 @@ const Stepper = (function(){
     <select id="${id}-ciudad" required disabled><option value="">Primero el departamento</option></select>
     <p class="error-campo" id="${id}-err-ciudad">Selecciona departamento y ciudad.</p>
     <label for="${id}-dir">Dirección o punto de referencia</label>
-    <input type="text" id="${id}-dir" maxlength="200" placeholder="Ej.: Cra 5 # 10-23, frente al parque" autocomplete="street-address">
+    <div class="autocompletar">
+      <input type="text" id="${id}-dir" maxlength="200" placeholder="Ej.: Cra 5 # 10-23, frente al parque" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
+      <div class="sugerencias" id="${id}-sug" role="listbox" aria-label="Direcciones sugeridas"></div>
+    </div>
     <div class="mini-mapa" id="${id}-mapa" role="application" aria-label="Ajusta el punto en el mapa"></div>
-    <p class="ayuda">El pin cae en el centro de la ciudad: arrástralo al punto exacto si puedes.</p>`;
+    <p class="ayuda">Escribe la dirección y elige una sugerencia para ubicar el pin, o arrástralo tú al punto exacto.</p>`;
   }
   function crear(id){
     const cont = document.querySelector(`[data-stepper="${id}"]`);
@@ -800,6 +818,54 @@ const Stepper = (function(){
       } else { st.mapa.setView([lat,lng], 14); st.pin.setLatLng([lat,lng]); }
       setTimeout(() => st.mapa.invalidateSize(), 60);
     });
+
+    // ─── Autocompletado de dirección (Photon, geocoder abierto de OSM; sin llave) ───
+    // Al elegir una sugerencia el pin salta solo al punto (ubicacion_ajustada=1)
+    // y sigue siendo arrastrable. Si no hay red o el geocoder falla, no pasa
+    // nada: se conserva el flujo manual de siempre.
+    const inputDir = $(`#${id}-dir`), caja = $(`#${id}-sug`);
+    let tSug = null, ctrl = null;
+    const cerrarSug = () => { caja.classList.remove('visible'); caja.innerHTML = ''; inputDir.setAttribute('aria-expanded','false'); };
+    inputDir.addEventListener('input', () => {
+      clearTimeout(tSug);
+      const q = inputDir.value.trim();
+      if (q.length < 3 || !selD.value || !selC.value) { cerrarSug(); return; }
+      tSug = setTimeout(async () => {
+        const [clat, clng] = CATALOGO[selD.value][selC.value];
+        try {
+          ctrl?.abort(); ctrl = new AbortController();
+          // sin lang: Photon solo soporta default/de/en/fr; 'default' devuelve los nombres locales
+          const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q + ', ' + selC.value)}&limit=6&lat=${clat}&lon=${clng}`;
+          const res = await fetch(url, {signal: ctrl.signal});
+          if (!res.ok) throw new Error('geocoder');
+          pintarSug((await res.json()).features || []);
+        } catch(e) { cerrarSug(); }
+      }, 350);
+    });
+    function pintarSug(feats){
+      caja.innerHTML = '';
+      if (!feats.length) { cerrarSug(); return; }
+      feats.forEach(f => {
+        const p = f.properties || {};
+        const principal = p.name || [p.street, p.housenumber].filter(Boolean).join(' ') || 'Punto en el mapa';
+        const secundario = [p.district, p.city, p.state].filter(Boolean).join(', ');
+        const [lng, lat] = f.geometry.coordinates;
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'sugerencia'; b.setAttribute('role','option');
+        b.innerHTML = `${esc(principal)}${secundario ? `<small>${esc(secundario)}</small>` : ''}`;
+        b.addEventListener('click', () => {
+          inputDir.value = principal + (secundario ? ', ' + secundario.split(',')[0].trim() : '');
+          cerrarSug();
+          st.ajustada = true;
+          if (st.pin) { st.pin.setLatLng([lat, lng]); st.mapa.setView([lat, lng], 17); }
+        });
+        caja.appendChild(b);
+      });
+      caja.classList.add('visible'); inputDir.setAttribute('aria-expanded','true');
+    }
+    inputDir.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarSug(); });
+    document.addEventListener('click', e => { if (!caja.contains(e.target) && e.target !== inputDir) cerrarSug(); });
+
     instancias[id] = st;
     return st;
   }

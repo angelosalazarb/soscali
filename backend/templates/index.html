@@ -549,6 +549,12 @@ const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 
 /* ═══ Catálogo — lo genera app.py en /static/catalogo.js desde catalogo.py ═══ */
 const CATALOGO = window.CATALOGO || {};
+// índice plano para buscar escribiendo, sin tildes ni mayúsculas
+const normTexto = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const DEPTOS_LISTA = Object.keys(CATALOGO).map(d => ({d, n: normTexto(d)}));
+const CIUDADES_TODAS = [];
+for (const [dep, cs] of Object.entries(CATALOGO))
+  for (const c of Object.keys(cs)) CIUDADES_TODAS.push({c, dep, n: normTexto(c)});
 
 const TIPO_META = {
   dano:         {nombre:'Daño estructural',   color:'#bc6e56'},
@@ -961,11 +967,17 @@ const Stepper = (function(){
   const instancias = {};
   function plantilla(id){
     return `
-    <label for="${id}-depto">Departamento <span class="req" aria-hidden="true">*</span></label>
-    <select id="${id}-depto" required><option value="">Selecciona…</option></select>
     <label for="${id}-ciudad">Ciudad o municipio <span class="req" aria-hidden="true">*</span></label>
-    <select id="${id}-ciudad" required disabled><option value="">Primero el departamento</option></select>
-    <p class="error-campo" id="${id}-err-ciudad">Selecciona departamento y ciudad.</p>
+    <div class="autocompletar">
+      <input type="text" id="${id}-ciudad" placeholder="Escribe y elige — el departamento se llena solo" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
+      <div class="sugerencias" id="${id}-ciudad-sug" role="listbox" aria-label="Municipios"></div>
+    </div>
+    <label for="${id}-depto">Departamento <span class="req" aria-hidden="true">*</span></label>
+    <div class="autocompletar">
+      <input type="text" id="${id}-depto" placeholder="Escribe y elige de la lista" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
+      <div class="sugerencias" id="${id}-depto-sug" role="listbox" aria-label="Departamentos"></div>
+    </div>
+    <p class="error-campo" id="${id}-err-ciudad">Elige la ciudad (y su departamento) de la lista de sugerencias.</p>
     <label for="${id}-dir">Dirección o punto de referencia</label>
     <div class="autocompletar">
       <input type="text" id="${id}-dir" maxlength="200" placeholder="Ej.: Cra 5 # 10-23, frente al parque" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list">
@@ -977,16 +989,11 @@ const Stepper = (function(){
   function crear(id){
     const cont = document.querySelector(`[data-stepper="${id}"]`);
     cont.innerHTML = plantilla(id);
-    const selD = $(`#${id}-depto`), selC = $(`#${id}-ciudad`);
-    Object.keys(CATALOGO).forEach(d => selD.add(new Option(d, d)));
-    const st = { mapa:null, pin:null, ajustada:false, id };
-    selD.addEventListener('change', () => {
-      selC.innerHTML = '<option value="">Selecciona…</option>'; selC.disabled = !selD.value;
-      if (selD.value) Object.keys(CATALOGO[selD.value]).forEach(c => selC.add(new Option(c, c)));
-    });
-    selC.addEventListener('change', () => {
-      if (!selD.value || !selC.value) return;
-      const [lat,lng] = CATALOGO[selD.value][selC.value];
+    const inpD = $(`#${id}-depto`), inpC = $(`#${id}-ciudad`);
+    const st = { mapa:null, pin:null, ajustada:false, depto:'', ciudad:'', id };
+
+    function posicionarMapa(){
+      const [lat,lng] = CATALOGO[st.depto][st.ciudad];
       st.ajustada = false;
       if (!st.mapa) {
         st.mapa = L.map(`${id}-mapa`, {zoomControl:true}).setView([lat,lng], 14);
@@ -999,7 +1006,67 @@ const Stepper = (function(){
         st.pin.on('dragend', () => { st.ajustada = true; });
       } else { st.mapa.setView([lat,lng], 14); st.pin.setLatLng([lat,lng]); }
       setTimeout(() => st.mapa.invalidateSize(), 60);
-    });
+    }
+
+    // ── Typeahead de ciudad y departamento (escribir y elegir) ──
+    // Elegir la ciudad rellena el departamento solo; elegir primero el
+    // departamento restringe la búsqueda de ciudades a ese departamento.
+    function typeahead(input, caja, buscar, alElegir){
+      const cerrar = () => { caja.classList.remove('visible'); caja.innerHTML = ''; input.setAttribute('aria-expanded','false'); };
+      const pintar = () => {
+        const q = normTexto(input.value.trim());
+        if (!q) { cerrar(); return; }
+        const items = buscar(q).slice(0, 8);
+        if (!items.length) { cerrar(); return; }
+        caja.innerHTML = '';
+        items.forEach(it => {
+          const b = document.createElement('button');
+          b.type = 'button'; b.className = 'sugerencia'; b.setAttribute('role','option');
+          b.innerHTML = `${esc(it.principal)}${it.secundario ? `<small>${esc(it.secundario)}</small>` : ''}`;
+          b.addEventListener('click', () => { cerrar(); alElegir(it); });
+          caja.appendChild(b);
+        });
+        caja.classList.add('visible'); input.setAttribute('aria-expanded','true');
+      };
+      input.addEventListener('input', pintar);
+      input.addEventListener('focus', pintar);
+      input.addEventListener('keydown', e => { if (e.key === 'Escape') cerrar(); });
+      document.addEventListener('click', e => { if (!caja.contains(e.target) && e.target !== input) cerrar(); });
+    }
+    // ranking: primero lo que empieza por lo escrito, luego lo que lo contiene
+    const rango = (n, q) => n.startsWith(q) ? 0 : (n.includes(q) ? 1 : 2);
+
+    typeahead(inpD, $(`#${id}-depto-sug`),
+      q => DEPTOS_LISTA.filter(x => x.n.includes(q))
+             .sort((a, b) => rango(a.n, q) - rango(b.n, q) || a.d.localeCompare(b.d))
+             .map(x => ({principal: x.d, dep: x.d})),
+      it => {
+        st.depto = it.dep; inpD.value = it.dep;
+        if (st.ciudad && !CATALOGO[st.depto][st.ciudad]) { st.ciudad = ''; inpC.value = ''; }
+        if (!st.ciudad) inpC.focus();
+      });
+
+    typeahead(inpC, $(`#${id}-ciudad-sug`),
+      q => {
+        // primero dentro del departamento elegido; si allí no hay
+        // coincidencias, en todo el país (y al elegir cambia el departamento)
+        let candidatas = st.depto
+          ? Object.keys(CATALOGO[st.depto]).map(c => ({c, dep: st.depto, n: normTexto(c)})).filter(x => x.n.includes(q))
+          : [];
+        if (!candidatas.length) candidatas = CIUDADES_TODAS.filter(x => x.n.includes(q));
+        return candidatas
+          .sort((a, b) => rango(a.n, q) - rango(b.n, q) || a.c.localeCompare(b.c))
+          .map(x => ({principal: x.c, secundario: x.dep, c: x.c, dep: x.dep}));
+      },
+      it => {
+        st.ciudad = it.c; st.depto = it.dep;
+        inpC.value = it.c; inpD.value = it.dep;   // el departamento se llena solo
+        posicionarMapa();
+      });
+
+    // escribir a mano invalida la elección: hay que tocar una sugerencia
+    inpD.addEventListener('input', () => { if (inpD.value !== st.depto) st.depto = ''; });
+    inpC.addEventListener('input', () => { if (inpC.value !== st.ciudad) st.ciudad = ''; });
 
     // ─── Autocompletado de dirección vía nuestro backend (/api/direcciones) ───
     // El servidor habla con TomTom si hay TOMTOM_KEY (mejor cobertura de
@@ -1013,11 +1080,11 @@ const Stepper = (function(){
     inputDir.addEventListener('input', () => {
       clearTimeout(tSug);
       const q = inputDir.value.trim();
-      if (q.length < 3 || !selD.value || !selC.value) { cerrarSug(); return; }
+      if (q.length < 3 || !st.depto || !st.ciudad) { cerrarSug(); return; }
       tSug = setTimeout(async () => {
         try {
           ctrl?.abort(); ctrl = new AbortController();
-          const p = new URLSearchParams({q, departamento: selD.value, ciudad: selC.value});
+          const p = new URLSearchParams({q, departamento: st.depto, ciudad: st.ciudad});
           const res = await fetch('/api/direcciones?' + p.toString(), {signal: ctrl.signal});
           if (!res.ok) throw new Error('geocoder');
           pintarSug(await res.json(), q);
@@ -1069,21 +1136,22 @@ const Stepper = (function(){
   }
   function leer(id){
     const st = instancias[id];
-    const depto = $(`#${id}-depto`).value, ciudad = $(`#${id}-ciudad`).value;
     const err = $(`#${id}-err-ciudad`);
-    if (!depto || !ciudad) { err.classList.add('visible'); $(`#${id}-depto`).focus(); return null; }
+    // st.depto/st.ciudad solo existen si se eligieron de las sugerencias
+    if (!st.depto || !st.ciudad || !CATALOGO[st.depto]?.[st.ciudad]) {
+      err.classList.add('visible'); $(`#${id}-ciudad`).focus(); return null;
+    }
     err.classList.remove('visible');
     let lat, lng;
     if (st.pin) { const p = st.pin.getLatLng(); lat = p.lat; lng = p.lng; }
-    else [lat,lng] = CATALOGO[depto][ciudad];
-    return { departamento: depto, ciudad, direccion: $(`#${id}-dir`).value.trim(),
+    else [lat,lng] = CATALOGO[st.depto][st.ciudad];
+    return { departamento: st.depto, ciudad: st.ciudad, direccion: $(`#${id}-dir`).value.trim(),
              lat, lng, ubicacion_ajustada: st.ajustada };
   }
   function reset(id){
     const st = instancias[id]; if (!st) return;
-    $(`#${id}-depto`).value = ''; $(`#${id}-ciudad`).innerHTML = '<option value="">Primero el departamento</option>';
-    $(`#${id}-ciudad`).disabled = true; $(`#${id}-dir`).value = '';
-    st.ajustada = false;
+    $(`#${id}-depto`).value = ''; $(`#${id}-ciudad`).value = ''; $(`#${id}-dir`).value = '';
+    st.depto = ''; st.ciudad = ''; st.ajustada = false;
   }
   return { asegurar, leer, reset };
 })();

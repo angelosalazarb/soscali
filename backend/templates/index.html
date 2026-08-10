@@ -156,10 +156,14 @@ label .req{color:var(--error)}
   position:fixed;left:0;right:0;bottom:0;z-index:1001;background:var(--card);
   border-radius:var(--radius) var(--radius) 0 0;border:1px solid var(--border);border-bottom:none;
   max-height:82dvh;overflow-y:auto;padding:10px 20px calc(20px + env(safe-area-inset-bottom));
-  transform:translateY(105%);transition:transform var(--trans);
+  /* +40px: cuando el panel flota a 24px del borde (pantallas anchas), el
+     translate de solo su altura lo dejaba asomado tapando la navegación */
+  transform:translateY(calc(100% + 40px));
+  pointer-events:none;
+  transition:transform var(--trans);
 }
 @media(min-width:768px){ #sheet{left:auto;right:24px;bottom:24px;width:420px;border-radius:var(--radius);border-bottom:1px solid var(--border)} }
-#sheet.visible{transform:none}
+#sheet.visible{transform:none;pointer-events:auto}
 .sheet-asa{width:44px;height:5px;border-radius:100px;background:var(--faint);margin:4px auto 12px}
 .sheet-cerrar{position:absolute;top:12px;right:12px;background:var(--faint);border:none;border-radius:50%;
   width:44px;height:44px;display:grid;place-items:center;cursor:pointer;color:var(--muted)}

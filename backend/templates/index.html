@@ -616,7 +616,7 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
 <div class="modal-fondo" id="modal-avistamiento" role="dialog" aria-modal="true" aria-labelledby="ma-titulo">
   <div class="modal">
     <h3 id="ma-titulo">Reportar avistamiento</h3>
-    <p>¿Dónde y cuándo lo viste? Cada pista con su hora ayuda a estrechar la búsqueda.</p>
+    <p id="ma-desc">¿Dónde y cuándo lo viste? Cada pista con su hora ayuda a estrechar la búsqueda.</p>
     <label for="ma-nota">Qué viste <span class="req" aria-hidden="true">*</span></label>
     <textarea id="ma-nota" maxlength="300" placeholder="Ej.: lo vi hoy ~4pm en el parque de la 14 con 5, iba hacia el sur"></textarea>
     <p class="error-campo" id="err-ma">Escribe dónde y cuándo (mínimo 5 letras).</p>
@@ -1133,15 +1133,19 @@ const Detalle = (function(){
       html += `<button class="btn bloque" style="margin-top:9px" id="btn-encontrado">
         ${r.tipo === 'mascota' ? '¡Ya apareció! — marcar encontrada' : '¡Ya apareció! — marcar como encontrado'}</button>`;
     }
-    if (r.tipo === 'mascota' || r.tipo === 'desaparecido') {
-      html += `<div class="dato"><div class="clave">Avistamientos</div>
-        <div class="valor-d" id="avist-lista" data-reporte="${esc(r.id)}"><span style="color:var(--muted)">Cargando…</span></div></div>`;
+    if (r.tipo === 'dano') {
+      html += `<button class="btn bloque" style="margin-top:14px" id="btn-avistamiento">
+        ${svgIcono('dano','currentColor',18)} Agregar actualización de la zona</button>`;
+    }
+    if (['mascota','desaparecido','dano'].includes(r.tipo)) {
+      html += `<div class="dato"><div class="clave">${r.tipo === 'dano' ? 'Actualizaciones de la zona' : 'Avistamientos'}</div>
+        <div class="valor-d" id="avist-lista" data-reporte="${esc(r.id)}" data-dano="${r.tipo === 'dano' ? 1 : 0}"><span style="color:var(--muted)">Cargando…</span></div></div>`;
     }
     $('#sheet-contenido').innerHTML = html;
     $('#sheet').classList.add('visible'); $('#sheet-fondo').classList.add('visible');
     $('#btn-tengo-info')?.addEventListener('click', () => Contacto.abrir(r.id));
     $('#btn-encontrado')?.addEventListener('click', () => Encontrado.abrir(r.id));
-    $('#btn-avistamiento')?.addEventListener('click', () => Avistamiento.abrir(r.id));
+    $('#btn-avistamiento')?.addEventListener('click', () => Avistamiento.abrir(r.id, r.tipo));
     if ($('#avist-lista')) Avistamiento.cargar(r.id);
     $('#sheet-cerrar').focus();
   }
@@ -1197,11 +1201,21 @@ const Avistamiento = (function(){
       cont.innerHTML = filas.length
         ? filas.map(a => `<div style="border-left:3px solid var(--indigo-dim);padding:4px 0 4px 10px;margin:6px 0">
             ${esc(a.nota)}<br><small style="color:var(--muted)">${esc(fechaCorta(a.creado_en))}</small></div>`).join('')
-        : '<span style="color:var(--muted)">Aún no hay avistamientos. Si lo has visto, repórtalo con el botón de arriba.</span>';
+        : `<span style="color:var(--muted)">${cont.dataset.dano === '1'
+            ? 'Aún no hay actualizaciones. Si conoces el estado de la zona, agrégala con el botón de arriba.'
+            : 'Aún no hay avistamientos. Si lo has visto, repórtalo con el botón de arriba.'}</span>`;
     } catch(e) { cont.innerHTML = '<span style="color:var(--muted)">No se pudieron cargar.</span>'; }
   }
-  function abrir(id){
+  function abrir(id, tipo){
     rid = id;
+    const esDano = tipo === 'dano';
+    $('#ma-titulo').textContent = esDano ? 'Actualización de la zona' : 'Reportar avistamiento';
+    $('#ma-desc').textContent = esDano
+      ? '¿Cómo está la zona ahora? (escombros, vías, servicios, atención en el lugar…)'
+      : '¿Dónde y cuándo lo viste? Cada pista con su hora ayuda a estrechar la búsqueda.';
+    $('#ma-nota').placeholder = esDano
+      ? 'Ej.: hoy 2pm ya removieron escombros, la calle sigue cerrada'
+      : 'Ej.: lo vi hoy ~4pm en el parque de la 14 con 5, iba hacia el sur';
     $('#ma-nota').value = '';
     $('#err-ma').classList.remove('visible');
     $('#modal-avistamiento').classList.add('visible');

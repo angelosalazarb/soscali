@@ -887,17 +887,18 @@ def listar_avistamientos(rid):
 
 @app.post("/api/reportes/<rid>/avistamientos")
 def crear_avistamiento(rid):
-    """Tracker comunitario: "lo vi en el parque X hoy a las 3pm". Cada nota
-    suma una pista con su hora; la trazabilidad ayuda a estrechar la búsqueda."""
+    """Tracker comunitario. En mascotas y desaparecidos son avistamientos
+    ("lo vi en el parque X a las 3pm"); en daños son actualizaciones de la
+    zona ("ya removieron los escombros", "la calle sigue cerrada")."""
     if not _rate_ok(f"avi:{_ip()}", maximo=10, ventana_seg=3600):
-        return jsonify({"error": "Demasiados avistamientos; intenta más tarde"}), 429
+        return jsonify({"error": "Demasiados aportes; intenta más tarde"}), 429
     nota = _texto((request.get_json(silent=True) or {}).get("nota"), 300)
     if len(nota) < 5:
-        return jsonify({"error": "Cuéntanos dónde y cuándo lo viste"}), 400
+        return jsonify({"error": "Cuéntanos qué viste, dónde y cuándo"}), 400
     with db() as conn:
         f = conn.execute("SELECT tipo, resuelto FROM reportes WHERE id=? AND estado='visible'",
                          (rid,)).fetchone()
-        if not f or f["tipo"] not in ("mascota", "desaparecido"):
+        if not f or f["tipo"] not in ("mascota", "desaparecido", "dano"):
             return jsonify({"error": "Reporte no encontrado"}), 404
         conn.execute("INSERT INTO avistamientos (reporte_id, nota, ip, user_agent)"
                      " VALUES (?,?,?,?)",

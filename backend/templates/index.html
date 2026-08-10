@@ -275,6 +275,23 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
       <button type="button" class="chip" data-valor="" aria-pressed="true">No sé</button>
     </div>
 
+    <label>¿Se necesita ayuda en el lugar?</label>
+    <div class="chips" id="dano-ayuda" role="group" aria-label="¿Se necesita ayuda en el lugar?">
+      <button type="button" class="chip" data-valor="si" aria-pressed="false">Sí, se necesita ayuda</button>
+      <button type="button" class="chip" data-valor="" aria-pressed="true">No por ahora</button>
+    </div>
+    <div id="dano-ayuda-detalle" class="oculto">
+      <label>¿Qué tipo de ayuda? <span class="req" aria-hidden="true">*</span></label>
+      <div class="chips" id="dano-ayuda-tipos" role="group" aria-label="Tipo de ayuda necesaria">
+        <button type="button" class="chip" data-valor="herramientas" aria-pressed="false">Herramientas</button>
+        <button type="button" class="chip" data-valor="maquinaria" aria-pressed="false">Maquinaria</button>
+        <button type="button" class="chip" data-valor="personas" aria-pressed="false">Personas / voluntarios</button>
+      </div>
+      <p class="error-campo" id="err-ayuda-tipos">Selecciona al menos un tipo de ayuda.</p>
+      <label for="dano-ayuda-desc">Describe qué se necesita</label>
+      <textarea id="dano-ayuda-desc" maxlength="500" placeholder="Ej.: retroexcavadora para remover escombros, 10 voluntarios con palas, gato hidráulico…"></textarea>
+    </div>
+
     <label for="dano-desc">Describe el daño</label>
     <textarea id="dano-desc" maxlength="1000" placeholder="Ej.: fachada agrietada, muro caído hacia la calle…"></textarea>
 
@@ -428,6 +445,7 @@ const TIPO_META = {
 const SEV_COLOR = {leve:'#075d4d', moderado:'#bc6e56', grave:'#692a27', colapso:'#692a27'};
 const SEV_NOMBRE = {leve:'Leve', moderado:'Moderado', grave:'Grave', colapso:'Colapso'};
 const NEC_NOMBRE = {agua:'Agua', alimentos:'Alimentos', medicamentos:'Medicamentos', ropa:'Ropa', cobijas:'Cobijas', aseo:'Kit de aseo', otros:'Otros'};
+const AYUDA_NOMBRE = {herramientas:'Herramientas', maquinaria:'Maquinaria', personas:'Personas / voluntarios'};
 
 const ICONO = {
   dano: '<path d="M21.73 18l-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
@@ -590,9 +608,16 @@ const Mapa = (function(){
       const titulo = r.tipo === 'desaparecido' ? (r.extras.nombre || 'Persona desaparecida')
                    : r.tipo === 'donacion' ? (r.extras.nombre_punto || 'Punto de donación')
                    : `Daño ${SEV_NOMBRE[r.extras.severidad] || ''}`.trim();
+      // qué se necesita, visible desde la lista sin abrir el detalle
+      let necesita = '';
+      if (r.tipo === 'donacion' && (r.extras.necesidades || []).length)
+        necesita = 'Se necesita: ' + r.extras.necesidades.map(n => NEC_NOMBRE[n] || n).join(', ');
+      if (r.tipo === 'dano' && r.extras.necesita_ayuda)
+        necesita = 'Necesita ayuda: ' + ((r.extras.ayuda_tipos || []).map(t => AYUDA_NOMBRE[t] || t).join(', ') || 'ver detalle');
       el.innerHTML = `<span class="icono">${svgIcono(r.tipo, colorReporte(r), 22)}</span>
         <div><h3>${esc(titulo)}</h3>
-        <p>${esc(r.ciudad)}, ${esc(r.departamento)}${r.direccion ? ' · ' + esc(r.direccion) : ''} · ${esc(fechaCorta(r.creado_en))}</p></div>`;
+        <p>${esc(r.ciudad)}, ${esc(r.departamento)}${r.direccion ? ' · ' + esc(r.direccion) : ''} · ${esc(fechaCorta(r.creado_en))}</p>
+        ${necesita ? `<p style="color:var(--indigo);font-weight:600">${esc(necesita)}</p>` : ''}</div>`;
       const abrir = () => Detalle.abrir(r);
       el.addEventListener('click', abrir);
       el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(); } });
@@ -664,6 +689,11 @@ const Detalle = (function(){
     if (r.tipo === 'dano') {
       html += `<div style="margin-top:10px"><span class="badge ${r.extras.severidad}">${svgIcono('dano','currentColor',13)} Severidad: ${SEV_NOMBRE[r.extras.severidad]}</span>
         ${r.extras.personas_atrapadas ? ' <span class="badge alerta">Posibles personas atrapadas — 123</span>' : ''}</div>`;
+      if (r.extras.necesita_ayuda) {
+        const tipos = (r.extras.ayuda_tipos || []).map(t => `<span class="badge tipo-desaparecido">${AYUDA_NOMBRE[t] || t}</span>`).join(' ');
+        html += `<div class="dato"><div class="clave">Se necesita ayuda</div><div class="valor-d">${tipos || '—'}</div></div>`
+              + fila('Qué se necesita', r.extras.ayuda_detalle);
+      }
     }
     if (r.tipo === 'desaparecido') {
       html += fila('Edad aproximada', r.extras.edad != null ? r.extras.edad + ' años' : '')
@@ -836,6 +866,12 @@ function pantallaExito(idExito, idForm, mensaje){
 /* ═══ Formulario: daños ═══ */
 const leerSev = chipUnico('#sev-dano');
 const leerAtrapadas = chipUnico('#dano-atrapadas');
+const leerAyuda = chipUnico('#dano-ayuda');
+const leerAyudaTipos = chipsMulti('#dano-ayuda-tipos');
+// el bloque de detalle de ayuda solo aparece si se marca "Sí"
+$('#dano-ayuda').addEventListener('click', () => {
+  $('#dano-ayuda-detalle').classList.toggle('oculto', leerAyuda() !== 'si');
+});
 $('#form-dano').addEventListener('submit', async e => {
   e.preventDefault();
   const ubic = Stepper.leer('dano'); if (!ubic) return;
@@ -843,10 +879,19 @@ $('#form-dano').addEventListener('submit', async e => {
   if (!sev) { $('#err-sev').classList.add('visible'); return; }
   $('#err-sev').classList.remove('visible');
   const atr = leerAtrapadas();
+  const extras = { severidad: sev, personas_atrapadas: atr === '' ? null : atr === 'si' };
+  if (leerAyuda() === 'si') {
+    const tipos = leerAyudaTipos();
+    if (!tipos.length) { $('#err-ayuda-tipos').classList.add('visible'); return; }
+    $('#err-ayuda-tipos').classList.remove('visible');
+    extras.necesita_ayuda = true;
+    extras.ayuda_tipos = tipos;
+    extras.ayuda_detalle = $('#dano-ayuda-desc').value.trim();
+  }
   const payload = {
     id: crypto.randomUUID(), tipo: 'dano', ...ubic,
     descripcion: $('#dano-desc').value.trim(),
-    extras: { severidad: sev, personas_atrapadas: atr === '' ? null : atr === 'si' },
+    extras,
     sitio_web: e.target.querySelector('.honeypot').value,
   };
   const btn = e.target.querySelector('[type="submit"]'); btn.disabled = true;

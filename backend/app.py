@@ -53,6 +53,7 @@ app = Flask(__name__)
 TIPOS = ("dano", "desaparecido", "donacion")
 SEVERIDADES = ("leve", "moderado", "grave", "colapso")
 NECESIDADES = ("agua", "alimentos", "medicamentos", "ropa", "cobijas", "aseo", "otros")
+TIPOS_AYUDA = ("herramientas", "maquinaria", "personas")
 
 # ─── SQLite ───────────────────────────────────────────────────────────────────
 
@@ -203,6 +204,16 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
         extras["severidad"] = extras_in["severidad"]
         if extras_in.get("personas_atrapadas") is not None:
             extras["personas_atrapadas"] = bool(extras_in["personas_atrapadas"])
+        # ayuda en el lugar: qué se necesita para atender el daño
+        if extras_in.get("necesita_ayuda"):
+            extras["necesita_ayuda"] = True
+            tipos = extras_in.get("ayuda_tipos")
+            if isinstance(tipos, list):
+                tipos = [t for t in tipos if t in TIPOS_AYUDA]
+                if tipos:
+                    extras["ayuda_tipos"] = sorted(set(tipos), key=TIPOS_AYUDA.index)
+            if extras_in.get("ayuda_detalle"):
+                extras["ayuda_detalle"] = _texto(extras_in["ayuda_detalle"], 500)
 
     elif tipo == "desaparecido":
         nombre = _texto(extras_in.get("nombre"), 120)
@@ -471,7 +482,8 @@ def admin_exportar():
         filas = conn.execute(f"SELECT * FROM reportes WHERE {where}"
                              " ORDER BY creado_en DESC", params).fetchall()
     buf = io.StringIO()
-    campos_extras = ["severidad", "personas_atrapadas", "nombre", "edad",
+    campos_extras = ["severidad", "personas_atrapadas", "necesita_ayuda",
+                     "ayuda_tipos", "ayuda_detalle", "nombre", "edad",
                      "descripcion_fisica", "visto_ultima_vez", "nombre_punto",
                      "necesidades", "horario"]
     w = csv.writer(buf, delimiter=";")  # ';' — Excel es-CO
@@ -480,8 +492,9 @@ def admin_exportar():
                 "canal", "creado_en", "moderado_en", "moderado_por"] + campos_extras)
     for f in filas:
         extras = json.loads(f["extras"] or "{}")
-        if isinstance(extras.get("necesidades"), list):
-            extras["necesidades"] = ", ".join(extras["necesidades"])
+        for lista in ("necesidades", "ayuda_tipos"):
+            if isinstance(extras.get(lista), list):
+                extras[lista] = ", ".join(extras[lista])
         w.writerow([f["id"], f["tipo"], f["departamento"], f["ciudad"], f["direccion"],
                     f["lat"], f["lng"], f["ubicacion_ajustada"], f["descripcion"],
                     f["telefono_contacto"], f["estado"], f["canal"], f["creado_en"],

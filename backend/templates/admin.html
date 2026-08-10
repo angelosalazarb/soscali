@@ -152,7 +152,7 @@ const SEV = {leve:'Leve', moderado:'Moderado', grave:'Grave', colapso:'Colapso'}
 const TIPO = {dano:'Daño', desaparecido:'Desaparecido', donacion:'Donación'};
 
 function resumen(r){
-  if (r.tipo === 'dano') return `Severidad ${SEV[r.extras.severidad] || '—'}${r.extras.personas_atrapadas ? ' · ATRAPADOS' : ''}${r.descripcion ? ' · ' + r.descripcion : ''}`;
+  if (r.tipo === 'dano') return `Severidad ${SEV[r.extras.severidad] || '—'}${r.extras.personas_atrapadas ? ' · ATRAPADOS' : ''}${r.extras.necesita_ayuda ? ' · AYUDA: ' + ((r.extras.ayuda_tipos || []).join(', ') || 'sí') + (r.extras.ayuda_detalle ? ' — ' + r.extras.ayuda_detalle : '') : ''}${r.descripcion ? ' · ' + r.descripcion : ''}`;
   if (r.tipo === 'desaparecido') return `${r.extras.nombre || '—'}${r.extras.edad != null ? ', ' + r.extras.edad + ' años' : ''} · visto: ${r.extras.visto_ultima_vez || '—'}`;
   return `${r.extras.nombre_punto || 'Punto'} · ${(r.extras.necesidades || []).join(', ')}`;
 }

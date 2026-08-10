@@ -265,9 +265,16 @@ def _rate_ok(clave: str, maximo: int, ventana_seg: int) -> bool:
 
 
 def _ip() -> str:
-    # Caddy antepone X-Forwarded-For; en local es la IP directa
-    return (request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-            or request.remote_addr or "?")
+    # Se toma el ÚLTIMO valor de X-Forwarded-For, no el primero: Caddy añade la
+    # IP real del cliente al final de la cadena. Si el cliente falsifica su
+    # propio XFF, queda a la izquierda y Caddy pone la verdadera a la derecha.
+    # Tomar el primero permitía spoofear la IP y así saltarse los rate-limits,
+    # inflar el contador de confirmaciones y envenenar los logs de auditoría.
+    # (Detrás de un único proxy de confianza; si algún día hay varios, ajustar.)
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        return xff.split(",")[-1].strip()
+    return request.remote_addr or "?"
 
 
 # ─── Validación por tipo ──────────────────────────────────────────────────────
@@ -299,8 +306,11 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
         return None, "Cuerpo inválido"
 
     rid = _texto(data.get("id"), 64)
-    if len(rid) < 8:
-        return None, "Falta el id del reporte"
+    # SOLO UUID-like: sin '/', '.' ni '..' — el id nombra el archivo de la foto
+    # ({id}.ext), así que un id con separadores permitiría escribir la foto
+    # fuera de data/fotos/ (path traversal). El cliente usa crypto.randomUUID().
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", rid):
+        return None, "id de reporte inválido"
 
     tipo = data.get("tipo")
     if tipo not in TIPOS:
@@ -469,6 +479,9 @@ def _guardar_foto(fila: dict, foto) -> str | None:
         return "El archivo no es una imagen válida"
     ext = {"jpeg": "jpg", "png": "png", "webp": "webp"}[m.group(1)]
     FOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    # el id ya viene validado (solo [A-Za-z0-9_-]); doble malla contra traversal
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", fila["id"]):
+        return "id de reporte inválido"
     nombre = f"{fila['id']}.{ext}"
     (FOTOS_DIR / nombre).write_bytes(crudo)
     fila["fotos"] = nombre

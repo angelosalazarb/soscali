@@ -1077,7 +1077,7 @@ const Detalle = (function(){
       html += `<div style="margin-top:10px"><span class="badge ${r.extras.severidad}">${svgIcono('dano','currentColor',13)} Severidad: ${SEV_NOMBRE[r.extras.severidad]}</span>
         ${r.extras.personas_atrapadas ? ' <span class="badge alerta">Posibles personas atrapadas — 123</span>' : ''}</div>`;
       if (r.extras.necesita_ayuda) {
-        const tipos = (r.extras.ayuda_tipos || []).map(t => `<span class="badge tipo-desaparecido">${AYUDA_NOMBRE[t] || t}</span>`).join(' ');
+        const tipos = (r.extras.ayuda_tipos || []).map(t => `<span class="badge tipo-desaparecido">${AYUDA_NOMBRE[t] || esc(t)}</span>`).join(' ');
         html += `<div class="dato"><div class="clave">Se necesita ayuda</div><div class="valor-d">${tipos || '—'}</div></div>`
               + fila('Qué se necesita', r.extras.ayuda_detalle);
       }
@@ -1106,7 +1106,7 @@ const Detalle = (function(){
             + fila('Ingresó', r.extras.fecha_ingreso);
     }
     if (r.tipo === 'donacion') {
-      const nec = (r.extras.necesidades || []).map(n => `<span class="badge tipo-donacion">${NEC_NOMBRE[n] || n}</span>`).join(' ');
+      const nec = (r.extras.necesidades || []).map(n => `<span class="badge tipo-donacion">${NEC_NOMBRE[n] || esc(n)}</span>`).join(' ');
       html += `<div class="dato"><div class="clave">Se necesita</div><div class="valor-d">${nec || '—'}</div></div>`
             + fila('Horario', r.extras.horario);
     }

@@ -803,7 +803,23 @@ const Mapa = (function(){
     } catch(e) { /* métricas no críticas */ }
   }
 
-  return { asegurar, recargar, filtro };
+  function enfocar(){
+    // zoom automático a la zona filtrada: ciudad → acercamiento directo;
+    // departamento → encuadre de todas sus ciudades; sin filtro → vista general
+    if (!mapa) return;
+    const { departamento, ciudad } = filtro;
+    if (departamento && ciudad) {
+      const [lat, lng] = CATALOGO[departamento][ciudad];
+      mapa.setView([lat, lng], 13);
+    } else if (departamento) {
+      const coords = Object.values(CATALOGO[departamento]);
+      mapa.fitBounds(L.latLngBounds(coords), {padding: [30, 30], maxZoom: 11});
+    } else {
+      mapa.setView([3.9, -76.3], 7);
+    }
+  }
+
+  return { asegurar, recargar, enfocar, filtro };
 })();
 
 function fechaCorta(iso){
@@ -820,9 +836,9 @@ function fechaCorta(iso){
     Mapa.filtro.departamento = selD.value; Mapa.filtro.ciudad = '';
     selC.innerHTML = '<option value="">Ciudad: todas</option>';
     if (selD.value) Object.keys(CATALOGO[selD.value]).forEach(c => selC.add(new Option(c, c)));
-    Mapa.recargar();
+    Mapa.recargar(); Mapa.enfocar();
   });
-  selC.addEventListener('change', () => { Mapa.filtro.ciudad = selC.value; Mapa.recargar(); });
+  selC.addEventListener('change', () => { Mapa.filtro.ciudad = selC.value; Mapa.recargar(); Mapa.enfocar(); });
   $('#filtro-fecha').addEventListener('change', e => { Mapa.filtro.fecha = e.target.value; Mapa.recargar(); });
   $('#filtro-tipo').addEventListener('click', e => {
     const btn = e.target.closest('.chip'); if (!btn) return;

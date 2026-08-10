@@ -187,8 +187,12 @@ label .req{color:var(--error)}
 .chip-grande[aria-pressed="true"]{border-color:var(--indigo);background:var(--indigo-dim);color:var(--indigo);font-weight:600}
 .mini-mapa{height:230px;border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;margin-top:8px;background:var(--faint)}
 /* z-index 1100: los controles de Leaflet del mini-mapa llegan a 1000 y
-   pintarían encima de las sugerencias sin este stacking context */
+   pintarían encima de las sugerencias sin este stacking context.
+   Con varios .autocompletar seguidos (ciudad + departamento) el de más
+   abajo en el DOM taparía el dropdown del anterior: el campo con foco
+   sube a 1200 para que su lista siempre quede encima. */
 .autocompletar{position:relative;z-index:1100}
+.autocompletar:focus-within{z-index:1200}
 .sugerencias{
   display:none;position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:1100;
   background:var(--card);border:1px solid var(--border);border-radius:var(--radius);

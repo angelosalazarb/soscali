@@ -369,9 +369,10 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
 
 def _guardar_foto(fila: dict, foto) -> str | None:
     """Guarda la foto (data URL base64) en disco y anota el nombre en la fila.
-    Devuelve un mensaje de error o None. Solo aplica a personas (desaparecidos
-    y pacientes de hospital); en otros tipos se ignora sin error."""
-    if not foto or fila["tipo"] not in ("desaparecido", "hospital"):
+    Devuelve un mensaje de error o None. Aplica a todos los tipos: persona
+    (desaparecidos/pacientes), foto de la zona en daños y flyer del punto de
+    donación."""
+    if not foto:
         return None
     m = re.match(r"data:image/(jpeg|png|webp);base64,(.+)$", str(foto), re.S)
     if not m:

@@ -335,6 +335,11 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
     <label for="dano-desc">Describe el daño</label>
     <textarea id="dano-desc" maxlength="1000" placeholder="Ej.: fachada agrietada, muro caído hacia la calle…"></textarea>
 
+    <label for="dano-foto">Foto del daño o de la zona</label>
+    <input type="file" id="dano-foto" accept="image/*">
+    <p class="ayuda">Una foto ayuda a dimensionar el daño y priorizar la ayuda. Se comprime automáticamente.</p>
+    <div id="dano-foto-prev"></div>
+
     <input class="honeypot" type="text" name="sitio_web" tabindex="-1" autocomplete="off" aria-hidden="true">
     <div class="paso"><button type="submit" class="btn primario bloque">Enviar reporte de daño</button></div>
   </form>
@@ -481,6 +486,11 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
 
     <label for="don-desc">Información adicional</label>
     <textarea id="don-desc" maxlength="1000" placeholder="Persona de contacto en el punto, indicaciones para llegar…"></textarea>
+
+    <label for="don-foto">Foto o flyer del punto</label>
+    <input type="file" id="don-foto" accept="image/*">
+    <p class="ayuda">Sube el flyer de la campaña o una foto del punto para que la gente lo reconozca. Se comprime automáticamente.</p>
+    <div id="don-foto-prev"></div>
 
     <input class="honeypot" type="text" name="sitio_web" tabindex="-1" autocomplete="off" aria-hidden="true">
     <div class="paso"><button type="submit" class="btn primario bloque">Registrar punto de donación</button></div>
@@ -875,8 +885,10 @@ const Detalle = (function(){
           : r.tipo === 'hospital' ? (r.extras.hospital || 'Hospital')
           : r.tipo === 'donacion' ? (r.extras.nombre_punto || 'Punto de donación')
           : (r.ciudad + ' — daño ' + (SEV_NOMBRE[r.extras.severidad]||'').toLowerCase()))}</h3></div></div>`;
-    if (r.fotos && (r.tipo === 'desaparecido' || r.tipo === 'hospital')) {
-      html += `<img src="/api/reportes/${encodeURIComponent(r.id)}/foto" alt="Foto de la persona"
+    if (r.fotos) {
+      const altFoto = {dano:'Foto del daño', donacion:'Foto o flyer del punto de donación',
+                       desaparecido:'Foto de la persona', hospital:'Foto del paciente'}[r.tipo] || 'Foto del reporte';
+      html += `<img src="/api/reportes/${encodeURIComponent(r.id)}/foto" alt="${altFoto}"
         style="width:100%;max-height:320px;object-fit:contain;background:var(--faint);border-radius:14px;border:1px solid var(--border);margin-top:12px" loading="lazy">`;
     }
     if (r.tipo === 'dano') {
@@ -1196,6 +1208,7 @@ function pantallaExito(idExito, idForm, mensaje){
 }
 
 /* ═══ Formulario: daños ═══ */
+const fotoDano = montarFoto('#dano-foto', '#dano-foto-prev');
 const leerSev = chipUnico('#sev-dano');
 const leerAtrapadas = chipUnico('#dano-atrapadas');
 const leerAyuda = chipUnico('#dano-ayuda');
@@ -1223,13 +1236,14 @@ $('#form-dano').addEventListener('submit', async e => {
   const payload = {
     id: crypto.randomUUID(), tipo: 'dano', ...ubic,
     descripcion: $('#dano-desc').value.trim(),
+    foto: fotoDano.valor(),
     extras,
     sitio_web: e.target.querySelector('.honeypot').value,
   };
   const btn = e.target.querySelector('[type="submit"]'); btn.disabled = true;
   const estado = await enviarReporte(payload); btn.disabled = false;
   if (estado === 'error') return;
-  Stepper.reset('dano');
+  Stepper.reset('dano'); fotoDano.reset();
   pantallaExito('#exito-dano', '#form-dano',
     estado === 'enviado' ? 'Daño reportado' : 'Reporte en cola de envío');
 });
@@ -1321,6 +1335,7 @@ $('#form-hospital').addEventListener('submit', async e => {
 });
 
 /* ═══ Formulario: donaciones ═══ */
+const fotoDon = montarFoto('#don-foto', '#don-foto-prev');
 const leerNec = chipsMulti('#don-necesidades');
 $('#form-donacion').addEventListener('submit', async e => {
   e.preventDefault();
@@ -1331,6 +1346,7 @@ $('#form-donacion').addEventListener('submit', async e => {
   const payload = {
     id: crypto.randomUUID(), tipo: 'donacion', ...ubic,
     descripcion: $('#don-desc').value.trim(),
+    foto: fotoDon.valor(),
     extras: { necesidades: nec, nombre_punto: $('#don-nombre').value.trim(),
               horario: $('#don-horario').value.trim() },
     sitio_web: e.target.querySelector('.honeypot').value,
@@ -1338,7 +1354,7 @@ $('#form-donacion').addEventListener('submit', async e => {
   const btn = e.target.querySelector('[type="submit"]'); btn.disabled = true;
   const estado = await enviarReporte(payload); btn.disabled = false;
   if (estado === 'error') return;
-  Stepper.reset('donacion');
+  Stepper.reset('donacion'); fotoDon.reset();
   pantallaExito('#exito-donacion', '#form-donacion',
     estado === 'enviado' ? 'Punto registrado' : 'Registro en cola de envío');
 });

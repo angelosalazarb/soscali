@@ -1006,57 +1006,35 @@ const Stepper = (function(){
       setTimeout(() => st.mapa.invalidateSize(), 60);
     });
 
-    // ─── Autocompletado de dirección (Photon, geocoder abierto de OSM; sin llave) ───
-    // Al elegir una sugerencia el pin salta solo al punto (ubicacion_ajustada=1)
-    // y sigue siendo arrastrable. Si no hay red o el geocoder falla, no pasa
-    // nada: se conserva el flujo manual de siempre.
+    // ─── Autocompletado de dirección vía nuestro backend (/api/direcciones) ───
+    // El servidor habla con TomTom si hay TOMTOM_KEY (mejor cobertura de
+    // predios en Colombia) o con Photon/OSM si no; también normaliza el
+    // formato colombiano (Cra 5 #10-23). La key nunca llega al navegador.
+    // Al elegir una sugerencia el pin salta solo (ubicacion_ajustada=1) y
+    // sigue siendo arrastrable; sin red se conserva el flujo manual.
     const inputDir = $(`#${id}-dir`), caja = $(`#${id}-sug`);
     let tSug = null, ctrl = null;
     const cerrarSug = () => { caja.classList.remove('visible'); caja.innerHTML = ''; inputDir.setAttribute('aria-expanded','false'); };
-    // El formato colombiano ("Cra 5 #10-23") confunde al geocoder: se expanden
-    // abreviaturas y se quitan # y guiones antes de consultar. El texto del
-    // campo queda tal como lo escribió la persona.
-    function normalizarDir(q){
-      return q
-        .replace(/\b(cll|cl)\.?\s*(?=\d)/gi, 'calle ')
-        .replace(/\b(cra|kra|cr|kr)\.?\s*(?=\d)/gi, 'carrera ')
-        .replace(/\b(av|avda)\.?\s*(?=\d)/gi, 'avenida ')
-        .replace(/\b(dg|diag)\.?\s*(?=\d)/gi, 'diagonal ')
-        .replace(/\b(tv|transv)\.?\s*(?=\d)/gi, 'transversal ')
-        .replace(/\bn[oº°]\.?\s*(?=\d)/gi, ' ')
-        .replace(/[#\-]/g, ' ')
-        .replace(/\s+/g, ' ').trim();
-    }
     inputDir.addEventListener('input', () => {
       clearTimeout(tSug);
       const q = inputDir.value.trim();
       if (q.length < 3 || !selD.value || !selC.value) { cerrarSug(); return; }
       tSug = setTimeout(async () => {
-        const [clat, clng] = CATALOGO[selD.value][selC.value];
-        const ciudad = selC.value;
         try {
           ctrl?.abort(); ctrl = new AbortController();
-          // sin lang (Photon solo soporta default/de/en/fr) y con bbox de
-          // ~25 km alrededor de la ciudad: sin él, el sesgo por lat/lon no
-          // impide resultados de otras ciudades o países.
-          const D = 0.22;
-          const bbox = `${clng - D},${clat - D},${clng + D},${clat + D}`;
-          const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(normalizarDir(q) + ', ' + ciudad)}&limit=8&lat=${clat}&lon=${clng}&bbox=${bbox}`;
-          const res = await fetch(url, {signal: ctrl.signal});
+          const p = new URLSearchParams({q, departamento: selD.value, ciudad: selC.value});
+          const res = await fetch('/api/direcciones?' + p.toString(), {signal: ctrl.signal});
           if (!res.ok) throw new Error('geocoder');
-          let feats = (await res.json()).features || [];
-          // la ciudad elegida primero; lo demás del bbox (municipios vecinos) después
-          feats.sort((a, b) => ((b.properties?.city === ciudad) ? 1 : 0) - ((a.properties?.city === ciudad) ? 1 : 0));
-          pintarSug(feats.slice(0, 5), q);
+          pintarSug(await res.json(), q);
         } catch(e) {
           if (e.name !== 'AbortError') pintarSug([], q);   // sin geocoder: al menos la opción manual
         }
       }, 350);
     });
-    function pintarSug(feats, q){
+    function pintarSug(sugs, q){
       caja.innerHTML = '';
-      // Primera opción SIEMPRE: usar la dirección tal como se escribió. OSM no
-      // tiene todos los predios; nadie debe quedar bloqueado por el geocoder.
+      // Primera opción SIEMPRE: usar la dirección tal como se escribió. Ningún
+      // geocoder tiene todos los predios; nadie debe quedar bloqueado por él.
       // El punto aproximado es el del mejor resultado de la zona (o el pin
       // actual, que arranca en el centro de la ciudad).
       const manual = document.createElement('button');
@@ -1065,27 +1043,20 @@ const Stepper = (function(){
       manual.addEventListener('click', () => {
         cerrarSug();
         if (st.pin) {
-          if (feats.length) {
-            const [lng0, lat0] = feats[0].geometry.coordinates;
-            st.pin.setLatLng([lat0, lng0]);
-          }
+          if (sugs.length) st.pin.setLatLng([sugs[0].lat, sugs[0].lng]);
           st.mapa.setView(st.pin.getLatLng(), 16);
         }
       });
       caja.appendChild(manual);
-      feats.forEach(f => {
-        const p = f.properties || {};
-        const principal = p.name || [p.street, p.housenumber].filter(Boolean).join(' ') || 'Punto en el mapa';
-        const secundario = [p.district, p.city, p.state].filter(Boolean).join(', ');
-        const [lng, lat] = f.geometry.coordinates;
+      sugs.forEach(s => {
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'sugerencia'; b.setAttribute('role','option');
-        b.innerHTML = `${esc(principal)}${secundario ? `<small>${esc(secundario)}</small>` : ''}`;
+        b.innerHTML = `${esc(s.principal)}${s.secundario ? `<small>${esc(s.secundario)}</small>` : ''}`;
         b.addEventListener('click', () => {
-          inputDir.value = principal + (secundario ? ', ' + secundario.split(',')[0].trim() : '');
+          inputDir.value = s.principal + (s.secundario ? ', ' + s.secundario.split(',')[0].trim() : '');
           cerrarSug();
           st.ajustada = true;
-          if (st.pin) { st.pin.setLatLng([lat, lng]); st.mapa.setView([lat, lng], 17); }
+          if (st.pin) { st.pin.setLatLng([s.lat, s.lng]); st.mapa.setView([s.lat, s.lng], 17); }
         });
         caja.appendChild(b);
       });

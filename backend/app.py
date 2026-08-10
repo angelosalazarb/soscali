@@ -39,6 +39,7 @@ import time
 from collections import defaultdict, deque
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
@@ -50,6 +51,7 @@ load_dotenv(BASE_DIR / ".env")
 
 DB_PATH = Path(os.environ.get("SISMO_DB", BASE_DIR / "data" / "sismo.db"))
 FOTOS_DIR = DB_PATH.parent / "fotos"
+TOMTOM_KEY = os.environ.get("TOMTOM_KEY", "").strip()
 
 app = Flask(__name__)
 # la foto viaja en el JSON como base64 (~1.4x su peso real); tope de seguridad
@@ -479,6 +481,101 @@ def contacto_desaparecido(rid):
             (rid, _texto(data.get("nombre_solicitante"), 120), _ip(),
              _texto(request.headers.get("User-Agent"), 300)))
     return jsonify({"telefono_contacto": f["telefono_contacto"]})
+
+
+# ─── Autocompletado de direcciones (proxy: la key nunca llega al navegador) ──
+#
+# El navegador consulta aquí; este backend habla con TomTom (datos propios,
+# mejor cobertura de predios en Colombia) usando TOMTOM_KEY del .env. Sin key,
+# o si TomTom falla, cae a Photon/OSM. Respuesta unificada:
+#   [{"principal": str, "secundario": str, "lat": float, "lng": float}]
+
+_ABREV_DIR = [
+    (re.compile(r"\b(cll|cl)\.?\s*(?=\d)", re.I), "calle "),
+    (re.compile(r"\b(cra|kra|cr|kr)\.?\s*(?=\d)", re.I), "carrera "),
+    (re.compile(r"\b(av|avda)\.?\s*(?=\d)", re.I), "avenida "),
+    (re.compile(r"\b(dg|diag)\.?\s*(?=\d)", re.I), "diagonal "),
+    (re.compile(r"\b(tv|transv)\.?\s*(?=\d)", re.I), "transversal "),
+    (re.compile(r"\bn[oº°]\.?\s*(?=\d)", re.I), " "),
+]
+
+
+def _normalizar_direccion(q: str) -> str:
+    """Expande el formato colombiano (Cra 5 #10-23) para los geocoders."""
+    for patron, reemplazo in _ABREV_DIR:
+        q = patron.sub(reemplazo, q)
+    return re.sub(r"\s+", " ", q.replace("#", " ").replace("-", " ")).strip()
+
+
+def _buscar_tomtom(q: str, ciudad: str, lat: float, lng: float) -> list[dict]:
+    r = requests.get(
+        f"https://api.tomtom.com/search/2/search/{requests.utils.quote(q + ', ' + ciudad)}.json",
+        params={"key": TOMTOM_KEY, "limit": 6, "countrySet": "CO",
+                "lat": lat, "lon": lng, "radius": 30000, "typeahead": "true"},
+        timeout=4)
+    r.raise_for_status()
+    out = []
+    for res in r.json().get("results", []):
+        dire = res.get("address", {})
+        pos = res.get("position", {})
+        principal = (res.get("poi", {}).get("name")
+                     or dire.get("freeformAddress", "").split(",")[0].strip())
+        secundario = ", ".join(x for x in (
+            dire.get("municipalitySubdivision"), dire.get("municipality"),
+            dire.get("countrySubdivision")) if x)
+        if principal and pos.get("lat") is not None:
+            out.append({"principal": principal, "secundario": secundario,
+                        "lat": pos["lat"], "lng": pos["lon"]})
+    return out
+
+
+def _buscar_photon(q: str, ciudad: str, lat: float, lng: float) -> list[dict]:
+    d = 0.22  # bbox ~25 km: el sesgo por lat/lon de Photon no filtra por sí solo
+    r = requests.get(
+        "https://photon.komoot.io/api/",
+        params={"q": f"{q}, {ciudad}", "limit": 8, "lat": lat, "lon": lng,
+                "bbox": f"{lng - d},{lat - d},{lng + d},{lat + d}"},
+        # Photon devuelve 403 al User-Agent genérico de requests; su política
+        # pide identificarse
+        headers={"User-Agent": "SOS-Terremoto-Colombia/1.0 (app ciudadana de emergencia)"},
+        timeout=4)
+    r.raise_for_status()
+    out = []
+    for f in r.json().get("features", []):
+        p = f.get("properties", {})
+        coords = f.get("geometry", {}).get("coordinates", [None, None])
+        principal = p.get("name") or " ".join(x for x in (p.get("street"), p.get("housenumber")) if x)
+        secundario = ", ".join(x for x in (p.get("district"), p.get("city"), p.get("state")) if x)
+        if principal and coords[0] is not None:
+            out.append({"principal": principal, "secundario": secundario,
+                        "lat": coords[1], "lng": coords[0]})
+    # la ciudad elegida primero; municipios vecinos del bbox después
+    out.sort(key=lambda s: 0 if ciudad in s["secundario"] else 1)
+    return out[:6]
+
+
+@app.get("/api/direcciones")
+def buscar_direcciones():
+    if not _rate_ok(f"dir:{_ip()}", maximo=30, ventana_seg=60):
+        return jsonify([]), 429
+    q = _texto(request.args.get("q"), 120)
+    depto = _texto(request.args.get("departamento"), 60)
+    ciudad = _texto(request.args.get("ciudad"), 60)
+    if len(q) < 3 or not catalogo.ciudad_valida(depto, ciudad):
+        return jsonify([])
+    lat, lng = catalogo.centroide(depto, ciudad)
+    qn = _normalizar_direccion(q)
+    if TOMTOM_KEY:
+        try:
+            res = _buscar_tomtom(qn, ciudad, lat, lng)
+            if res:
+                return jsonify(res)
+        except requests.RequestException:
+            pass  # TomTom caído o sin cuota: probar Photon
+    try:
+        return jsonify(_buscar_photon(qn, ciudad, lat, lng))
+    except requests.RequestException:
+        return jsonify([])
 
 
 @app.get("/api/reportes/<rid>/foto")

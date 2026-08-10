@@ -222,6 +222,9 @@ if __name__ == "__main__":
     parser.add_argument("--password", default="", help="contraseña (si no, se pide en pantalla)")
     args = parser.parse_args()
 
+    # data/ está en .gitignore: si el CLI corre antes que la app (p. ej. crear
+    # el primer admin en un despliegue nuevo), la carpeta aún no existe
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA_USUARIOS)

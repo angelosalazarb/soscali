@@ -1,7 +1,7 @@
 # SOS Terremoto — Reporte ciudadano
 
 Web mobile-first para reportar y consultar afectaciones tras el sismo en el
-suroccidente colombiano (Valle del Cauca, Quindío, Chocó, Cauca, Risaralda).
+país (los 33 departamentos con sus 1.000+ cabeceras municipales, catálogo generado desde GeoNames).
 
 **Secciones** (una sola página, navegación inferior + deep-links):
 

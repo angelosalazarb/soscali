@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SOS Sismo — Reporte ciudadano</title>
-<meta name="description" content="Reporta y consulta daños estructurales, personas desaparecidas y puntos de donación tras el sismo. Valle del Cauca, Quindío, Chocó, Cauca y Risaralda.">
+<meta name="description" content="Reporta y consulta daños estructurales, personas desaparecidas y puntos de donación tras el sismo, en toda Colombia.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 2'%3E%3Crect width='3' height='1' fill='%23FCD116'/%3E%3Crect y='1' width='3' height='0.5' fill='%23003893'/%3E%3Crect y='1.5' width='3' height='0.5' fill='%23CE1126'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
 <style>
@@ -250,7 +250,7 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
 <header class="top">
   <p class="eyebrow">Reporte ciudadano · Sismo</p>
   <h1 id="titulo-vista">Mapa de afectaciones</h1>
-  <p class="sub" id="sub-vista">Valle del Cauca · Quindío · Chocó · Cauca · Risaralda</p>
+  <p class="sub" id="sub-vista">Reportes ciudadanos en toda Colombia</p>
 </header>
 
 <main>
@@ -540,20 +540,15 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
 <div id="toasts" aria-live="polite"></div>
 
 <script src="/static/vendor/leaflet/leaflet.js"></script>
+<script src="/static/catalogo.js"></script>
 <script>
 'use strict';
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-/* ═══ Catálogo — espejo de backend/catalogo.py (mantener sincronizados) ═══ */
-const CATALOGO = {
-  "Valle del Cauca": {"Cali":[3.4516,-76.5320],"Palmira":[3.5394,-76.3036],"Buenaventura":[3.8801,-77.0312],"Tuluá":[4.0847,-76.1954],"Buga":[3.9008,-76.2983],"Jamundí":[3.2610,-76.5340],"Yumbo":[3.5849,-76.4959],"Cartago":[4.7464,-75.9117]},
-  "Quindío": {"Armenia":[4.5339,-75.6811],"Calarcá":[4.5296,-75.6413],"Montenegro":[4.5664,-75.7505],"La Tebaida":[4.4525,-75.7877],"Circasia":[4.6194,-75.6353],"Quimbaya":[4.6236,-75.7625]},
-  "Chocó": {"Quibdó":[5.6947,-76.6611],"Istmina":[5.1606,-76.6839],"Condoto":[5.0912,-76.6499],"Tadó":[5.2652,-76.5586],"Bahía Solano":[6.2244,-77.4014]},
-  "Cauca": {"Popayán":[2.4448,-76.6147],"Santander de Quilichao":[3.0094,-76.4846],"Puerto Tejada":[3.2341,-76.4180],"Guapi":[2.5716,-77.8858]},
-  "Risaralda": {"Pereira":[4.8087,-75.6906],"Dosquebradas":[4.8318,-75.6731],"Santa Rosa de Cabal":[4.8686,-75.6214],"La Virginia":[4.8996,-75.8828]},
-};
+/* ═══ Catálogo — lo genera app.py en /static/catalogo.js desde catalogo.py ═══ */
+const CATALOGO = window.CATALOGO || {};
 
 const TIPO_META = {
   dano:         {nombre:'Daño estructural',   color:'#bc6e56'},
@@ -684,7 +679,7 @@ function montarFoto(inputSel, prevSel){
 
 /* ═══ Router por hash ═══ */
 const TITULOS = {
-  mapa: ['Mapa de afectaciones', 'Valle del Cauca · Quindío · Chocó · Cauca · Risaralda'],
+  mapa: ['Mapa de afectaciones', 'Reportes ciudadanos en toda Colombia'],
   danos: ['Reportar daño estructural', 'Ubica el lugar y describe el daño. Si hay personas atrapadas llama primero al 123.'],
   desaparecidos: ['Desaparecidos', 'Personas buscadas por su familia y pacientes sin identificar reportados por hospitales.'],
   donaciones: ['Punto de donación', 'Registra dónde se reciben donaciones y qué insumos se necesitan.'],
@@ -718,7 +713,7 @@ const Mapa = (function(){
 
   function asegurar(){
     if (mapa) { mapa.invalidateSize(); return; }
-    mapa = L.map('mapa', {zoomControl:true}).setView([3.9, -76.3], 7);
+    mapa = L.map('mapa', {zoomControl:true}).setView([4.6, -74.1], 6);
     const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 18, attribution: '&copy; OpenStreetMap',
     });
@@ -815,7 +810,7 @@ const Mapa = (function(){
       const coords = Object.values(CATALOGO[departamento]);
       mapa.fitBounds(L.latLngBounds(coords), {padding: [30, 30], maxZoom: 11});
     } else {
-      mapa.setView([3.9, -76.3], 7);
+      mapa.setView([4.6, -74.1], 6);
     }
   }
 

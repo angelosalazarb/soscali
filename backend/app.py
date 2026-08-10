@@ -157,6 +157,17 @@ def init_db() -> None:
 init_db()
 auth.registrar_endpoints(app, db)
 
+# El frontend carga el catálogo desde /static/catalogo.js: con 1.000+
+# municipios ya no viaja inline en el HTML. Se regenera en cada arranque
+# para que catalogo.py sea la única fuente de verdad.
+_CATALOGO_JS = BASE_DIR / "static" / "catalogo.js"
+_CATALOGO_JS.write_text(
+    "// Generado por app.py desde catalogo.py — no editar a mano\n"
+    "window.CATALOGO = " + json.dumps(
+        {d: {c: [lat, lng] for c, (lat, lng) in cs.items()}
+         for d, cs in catalogo.CATALOGO.items()}, ensure_ascii=False) + ";\n",
+    encoding="utf-8")
+
 if not os.environ.get("JWT_SECRET_KEY"):
     print("[AVISO] JWT_SECRET_KEY no está en .env — el login del panel admin fallará. "
           "Genera uno: python -c \"import secrets; print(secrets.token_hex(48))\"", flush=True)

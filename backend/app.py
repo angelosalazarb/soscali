@@ -84,6 +84,9 @@ CREATE TABLE IF NOT EXISTS reportes (
   estado             TEXT DEFAULT 'visible',    -- visible | oculto | eliminado (soft delete: nada se borra de la BD)
   canal              TEXT DEFAULT 'web',        -- web | whatsapp (fase 2)
   confirmaciones     INTEGER DEFAULT 1,         -- cuántas personas han reportado/confirmado esto
+  resuelto           INTEGER DEFAULT 0,         -- 1 = encontrado/reunido (desaparecidos, pacientes, mascotas)
+  resuelto_comentario TEXT,                     -- cómo/dónde apareció (público)
+  resuelto_en        TEXT,
   creado_en          TEXT DEFAULT (datetime('now')),
   moderado_en        TEXT,
   moderado_por       TEXT
@@ -111,6 +114,16 @@ CREATE TABLE IF NOT EXISTS confirmaciones_log (
   user_agent TEXT,
   creado_en  TEXT DEFAULT (datetime('now')),
   UNIQUE(reporte_id, ip)
+);
+
+-- Quién marcó un reporte como encontrado/reunido, con su comentario.
+CREATE TABLE IF NOT EXISTS resoluciones_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  reporte_id TEXT NOT NULL,
+  comentario TEXT,
+  ip         TEXT,
+  user_agent TEXT,
+  creado_en  TEXT DEFAULT (datetime('now'))
 );
 
 -- Caché de geocoding: cada consulta resuelta (TomTom o Photon) se guarda y
@@ -158,6 +171,10 @@ def init_db() -> None:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(reportes)")}
         if "confirmaciones" not in cols:
             conn.execute("ALTER TABLE reportes ADD COLUMN confirmaciones INTEGER DEFAULT 1")
+        if "resuelto" not in cols:
+            conn.execute("ALTER TABLE reportes ADD COLUMN resuelto INTEGER DEFAULT 0")
+            conn.execute("ALTER TABLE reportes ADD COLUMN resuelto_comentario TEXT")
+            conn.execute("ALTER TABLE reportes ADD COLUMN resuelto_en TEXT")
         sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table'"
                            " AND name='reportes'").fetchone()[0]
         if "'mascota'" not in sql:
@@ -166,7 +183,8 @@ def init_db() -> None:
             # cruzaría los datos
             columnas = ("id, tipo, departamento, ciudad, direccion, lat, lng,"
                         " ubicacion_ajustada, descripcion, extras, telefono_contacto,"
-                        " fotos, estado, canal, confirmaciones, creado_en,"
+                        " fotos, estado, canal, confirmaciones, resuelto,"
+                        " resuelto_comentario, resuelto_en, creado_en,"
                         " moderado_en, moderado_por")
             conn.executescript(
                 "ALTER TABLE reportes RENAME TO reportes_v1;"
@@ -446,7 +464,8 @@ def _guardar_foto(fila: dict, foto) -> str | None:
 # es explícito para que nunca se filtre por un futuro SELECT *.
 COLS_PUBLICAS = ("id, tipo, departamento, ciudad, direccion, lat, lng,"
                  " ubicacion_ajustada, descripcion, extras, fotos, canal,"
-                 " confirmaciones, creado_en")
+                 " confirmaciones, resuelto, resuelto_comentario, resuelto_en,"
+                 " creado_en")
 
 
 def _fila_publica(f: sqlite3.Row) -> dict:
@@ -842,19 +861,50 @@ def confirmar_reporte(rid):
     return jsonify({"ok": True, "confirmaciones": total})
 
 
+@app.post("/api/reportes/<rid>/encontrado")
+def marcar_encontrado(rid):
+    """Cierra el ciclo con la buena noticia: marca un desaparecido, paciente
+    o mascota como encontrado/reunido. El reporte NO se borra: queda visible
+    con la insignia y el comentario, que es información para todos los que lo
+    buscaban. Auditado y reversible desde el panel admin."""
+    if not _rate_ok(f"enc:{_ip()}", maximo=5, ventana_seg=3600):
+        return jsonify({"error": "Demasiadas marcas; intenta más tarde"}), 429
+    comentario = _texto((request.get_json(silent=True) or {}).get("comentario"), 500)
+    if len(comentario) < 5:
+        return jsonify({"error": "Cuéntanos brevemente cómo o dónde apareció"}), 400
+    with db() as conn:
+        f = conn.execute("SELECT tipo, resuelto FROM reportes WHERE id=? AND estado='visible'",
+                         (rid,)).fetchone()
+        if not f or f["tipo"] not in ("desaparecido", "hospital", "mascota"):
+            return jsonify({"error": "Reporte no encontrado"}), 404
+        conn.execute("INSERT INTO resoluciones_log (reporte_id, comentario, ip, user_agent)"
+                     " VALUES (?,?,?,?)",
+                     (rid, comentario, _ip(), _texto(request.headers.get("User-Agent"), 300)))
+        # si ya estaba marcado, el comentario nuevo se suma al log pero el
+        # público conserva el primero (el admin ve todos)
+        if not f["resuelto"]:
+            conn.execute("UPDATE reportes SET resuelto=1, resuelto_comentario=?,"
+                         " resuelto_en=datetime('now') WHERE id=?", (comentario, rid))
+    return jsonify({"ok": True})
+
+
 @app.get("/api/metricas")
 def metricas():
     with db() as conn:
+        # los encontrados no cuentan como activos: la métrica mide lo pendiente
         por_tipo = {t: 0 for t in TIPOS}
         for f in conn.execute("SELECT tipo, COUNT(*) n FROM reportes"
-                              " WHERE estado='visible' GROUP BY tipo"):
+                              " WHERE estado='visible' AND resuelto=0 GROUP BY tipo"):
             por_tipo[f["tipo"]] = f["n"]
+        encontrados = conn.execute("SELECT COUNT(*) FROM reportes"
+                                   " WHERE estado='visible' AND resuelto=1").fetchone()[0]
         por_ciudad = [dict(f) for f in conn.execute(
             "SELECT departamento, ciudad, COUNT(*) n FROM reportes"
             " WHERE estado='visible' GROUP BY departamento, ciudad ORDER BY n DESC")]
         ult24 = conn.execute("SELECT COUNT(*) FROM reportes WHERE estado='visible'"
                              " AND creado_en >= datetime('now','-1 day')").fetchone()[0]
-    return jsonify({"por_tipo": por_tipo, "por_ciudad": por_ciudad, "ultimas_24h": ult24})
+    return jsonify({"por_tipo": por_tipo, "por_ciudad": por_ciudad,
+                    "ultimas_24h": ult24, "encontrados": encontrados})
 
 
 @app.get("/static/<path:fname>")
@@ -898,7 +948,15 @@ def admin_reportes():
 @auth.requiere_login(db)
 def admin_moderar(rid):
     from flask import g
-    estado = (request.get_json(silent=True) or {}).get("estado")
+    cuerpo = request.get_json(silent=True) or {}
+    if "resuelto" in cuerpo:
+        # reabrir (o cerrar) un caso: revierte marcas de 'encontrado' falsas
+        with db() as conn:
+            n = conn.execute("UPDATE reportes SET resuelto=?, moderado_en=datetime('now'),"
+                             " moderado_por=? WHERE id=? AND estado != 'eliminado'",
+                             (1 if cuerpo["resuelto"] else 0, g.usuario["username"], rid)).rowcount
+        return (jsonify({"ok": True}), 200) if n else (jsonify({"error": "No existe"}), 404)
+    estado = cuerpo.get("estado")
     if estado not in ("visible", "oculto"):
         return jsonify({"error": "estado debe ser 'visible' u 'oculto'"}), 400
     with db() as conn:

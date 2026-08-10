@@ -602,6 +602,22 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
   </div>
 </div>
 
+<!-- ═══ Modal "¡Ya apareció!" ═══ -->
+<div class="modal-fondo" id="modal-encontrado" role="dialog" aria-modal="true" aria-labelledby="me-titulo">
+  <div class="modal">
+    <h3 id="me-titulo">¡Qué buena noticia!</h3>
+    <p>Cuéntanos brevemente cómo o dónde apareció. El reporte quedará marcado
+       como <strong>encontrado</strong> para avisar a todos los que lo buscaban.</p>
+    <label for="me-comentario">¿Cómo apareció? <span class="req" aria-hidden="true">*</span></label>
+    <textarea id="me-comentario" maxlength="500" placeholder="Ej.: apareció en casa de un vecino, está bien y ya está con su familia"></textarea>
+    <p class="error-campo" id="err-me">Escribe un comentario breve (mínimo 5 letras).</p>
+    <div style="display:flex;gap:9px;margin-top:18px">
+      <button class="btn" id="me-cancelar" style="flex:1">Cancelar</button>
+      <button class="btn primario" id="me-marcar" style="flex:1">Marcar encontrado</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Navegación inferior ═══ -->
 <nav class="inferior" aria-label="Secciones">
   <a href="#/mapa" data-nav="mapa">
@@ -666,6 +682,7 @@ function svgIcono(tipo, color, tam=18){
   return `<svg width="${tam}" height="${tam}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONO[tipo]}</svg>`;
 }
 function colorReporte(r){
+  if (r.resuelto) return '#075d4d';   // encontrado/reunido: verde esperanza
   return r.tipo === 'dano' ? (SEV_COLOR[r.extras.severidad] || '#bc6e56') : TIPO_META[r.tipo].color;
 }
 
@@ -928,6 +945,7 @@ const Mapa = (function(){
       el.innerHTML = `<span class="icono">${svgIcono(r.tipo, colorReporte(r), 22)}</span>
         <div><h3>${esc(titulo)}</h3>
         <p>${esc(r.ciudad)}, ${esc(r.departamento)}${r.direccion ? ' · ' + esc(r.direccion) : ''} · ${esc(fechaCorta(r.creado_en))}${(r.confirmaciones || 1) > 1 ? ` · <strong style="color:var(--esmeralda)">${r.confirmaciones} reportes</strong>` : ''}</p>
+        ${r.resuelto ? '<p><span class="badge leve">Encontrado</span></p>' : ''}
         ${necesita ? `<p style="color:var(--indigo);font-weight:600">${esc(necesita)}</p>` : ''}</div>`;
       const abrir = () => Detalle.abrir(r);
       el.addEventListener('click', abrir);
@@ -945,7 +963,8 @@ const Mapa = (function(){
         <div class="metrica"><span class="valor">${m.por_tipo.hospital || 0}</span><span class="nombre">${svgIcono('hospital','#271d67',14)} Sin identificar (hospitales)</span></div>
         <div class="metrica"><span class="valor">${m.por_tipo.donacion}</span><span class="nombre">${svgIcono('donacion','#00332a',14)} Puntos de donación</span></div>
         <div class="metrica"><span class="valor">${m.por_tipo.mascota || 0}</span><span class="nombre">${svgIcono('mascota','#3d2e8a',14)} Mascotas perdidas</span></div>
-        <div class="metrica"><span class="valor">${m.ultimas_24h}</span><span class="nombre">Últimas 24 horas</span></div>`;
+        <div class="metrica"><span class="valor">${m.ultimas_24h}</span><span class="nombre">Últimas 24 horas</span></div>
+        <div class="metrica"><span class="valor" style="color:var(--esmeralda)">${m.encontrados || 0}</span><span class="nombre">Encontrados</span></div>`;
     } catch(e) { /* métricas no críticas */ }
   }
 
@@ -1062,21 +1081,25 @@ const Detalle = (function(){
           + fila('Descripción', r.descripcion)
           + fila('Reportado', fechaCorta(r.creado_en) + (r.ubicacion_ajustada ? ' · ubicación exacta' : ' · ubicación aproximada'))
           + fila('Comunidad', `${r.confirmaciones || 1} ${(r.confirmaciones || 1) === 1 ? 'persona ha reportado esto' : 'personas han reportado esto'}`);
-    if (r.tipo === 'desaparecido') {
-      html += `<button class="btn primario bloque" style="margin-top:14px" id="btn-tengo-info">
-        ${svgIcono('desaparecido','currentColor',18)} Tengo información</button>`;
+    const buscable = ['desaparecido','hospital','mascota'].includes(r.tipo);
+    if (buscable && r.resuelto) {
+      html += `<div style="margin-top:12px"><span class="badge leve">${r.tipo === 'mascota' ? 'Encontrada' : (r.tipo === 'hospital' ? 'Identificado — reunido' : 'Encontrado')}</span></div>`
+            + fila('Cómo apareció', r.resuelto_comentario)
+            + fila('Marcado', fechaCorta(r.resuelto_en));
     }
-    if (r.tipo === 'hospital') {
+    if (buscable && !r.resuelto) {
+      const rotulo = {desaparecido:'Tengo información',
+                      hospital:'Es mi familiar — ver teléfono del hospital',
+                      mascota:'Tengo información'}[r.tipo];
       html += `<button class="btn primario bloque" style="margin-top:14px" id="btn-tengo-info">
-        ${svgIcono('hospital','currentColor',18)} Es mi familiar — ver teléfono del hospital</button>`;
-    }
-    if (r.tipo === 'mascota') {
-      html += `<button class="btn primario bloque" style="margin-top:14px" id="btn-tengo-info">
-        ${svgIcono('mascota','currentColor',18)} Tengo información</button>`;
+        ${svgIcono(r.tipo,'currentColor',18)} ${rotulo}</button>
+        <button class="btn bloque" style="margin-top:9px" id="btn-encontrado">
+        ${r.tipo === 'mascota' ? '¡Ya apareció! — marcar encontrada' : '¡Ya apareció! — marcar como encontrado'}</button>`;
     }
     $('#sheet-contenido').innerHTML = html;
     $('#sheet').classList.add('visible'); $('#sheet-fondo').classList.add('visible');
     $('#btn-tengo-info')?.addEventListener('click', () => Contacto.abrir(r.id));
+    $('#btn-encontrado')?.addEventListener('click', () => Encontrado.abrir(r.id));
     $('#sheet-cerrar').focus();
   }
   function cerrar(){ $('#sheet').classList.remove('visible'); $('#sheet-fondo').classList.remove('visible'); actual = null; }
@@ -1117,6 +1140,41 @@ const Contacto = (function(){
       $('#mc-acciones').style.display = 'none';
     } catch(e) { toast(e.message === 'Failed to fetch' ? 'Sin conexión; intenta de nuevo.' : e.message, 'error'); }
     finally { $('#mc-ver').disabled = false; }
+  });
+  return { abrir, cerrar };
+})();
+
+/* ═══ Modal "¡Ya apareció!": cierra el ciclo con la buena noticia ═══ */
+const Encontrado = (function(){
+  let rid = null;
+  function abrir(id){
+    rid = id;
+    $('#me-comentario').value = '';
+    $('#err-me').classList.remove('visible');
+    $('#modal-encontrado').classList.add('visible');
+    $('#me-comentario').focus();
+  }
+  function cerrar(){ $('#modal-encontrado').classList.remove('visible'); rid = null; }
+  $('#me-cancelar').addEventListener('click', cerrar);
+  $('#modal-encontrado').addEventListener('click', e => { if (e.target === e.currentTarget) cerrar(); });
+  $('#me-marcar').addEventListener('click', async () => {
+    if (!rid) return;
+    const comentario = $('#me-comentario').value.trim();
+    if (comentario.length < 5) { $('#err-me').classList.add('visible'); return; }
+    $('#err-me').classList.remove('visible');
+    $('#me-marcar').disabled = true;
+    try {
+      const res = await fetch(`/api/reportes/${encodeURIComponent(rid)}/encontrado`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({comentario}),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+      cerrar(); Detalle.cerrar();
+      toast('¡Qué buena noticia! Quedó marcado como encontrado.', 'exito');
+      Mapa.recargar();
+    } catch(e) { toast(e.message === 'Failed to fetch' ? 'Sin conexión; intenta de nuevo.' : e.message, 'error'); }
+    finally { $('#me-marcar').disabled = false; }
   });
   return { abrir, cerrar };
 })();

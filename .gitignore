@@ -12,3 +12,6 @@ __pycache__/
 # Sistema
 .DS_Store
 *.log
+
+# Guía de despliegue con detalles de infraestructura: solo local, no al repo público
+backend/deploy/README-DEPLOY.md

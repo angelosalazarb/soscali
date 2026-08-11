@@ -38,14 +38,32 @@ body{
 }
 :focus-visible{outline:3px solid var(--indigo);outline-offset:2px;border-radius:4px}
 
-/* ─── Aviso: no oficial ─── */
+/* ─── Aviso: ticker animado (no oficial + créditos) ─── */
 .disclaimer{
   background:var(--faint);border-bottom:1px solid var(--border);
-  padding:calc(8px + env(safe-area-inset-top)) 20px 8px;
-  font-size:12.5px;color:var(--muted);text-align:center;line-height:1.5;
+  padding-top:env(safe-area-inset-top);
+  font-size:12.5px;color:var(--muted);line-height:1.5;overflow:hidden;
 }
+.ticker{
+  overflow:hidden;white-space:nowrap;padding:8px 0;
+  /* difuminado en los bordes para que el texto entre y salga suave */
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent);
+          mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent);
+}
+.ticker-track{display:inline-flex;will-change:transform;animation:ticker 34s linear infinite}
+.ticker:hover .ticker-track{animation-play-state:paused}   /* pausa al pasar el cursor */
+.ticker-item{flex:none;padding-right:3rem}
 .disclaimer strong{color:var(--tinta);font-weight:600}
 .disclaimer a{color:var(--indigo);font-weight:600}
+.disclaimer .creditos{color:var(--indigo);font-weight:600}
+@keyframes ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+/* con movimiento reducido: banner estático, centrado y que envuelve */
+@media (prefers-reduced-motion:reduce){
+  .ticker{white-space:normal}
+  .ticker-track{animation:none;display:block}
+  .ticker-item{padding:0 20px;text-align:center;white-space:normal}
+  .ticker-item[aria-hidden="true"]{display:none}
+}
 
 /* ─── Cabecera ─── */
 header.top{padding:14px 20px 10px;max-width:1240px;margin:0 auto}  /* el safe-area superior lo absorbe .disclaimer */
@@ -259,9 +277,13 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
 </head>
 <body>
 
-<div class="disclaimer" role="note">
-  Iniciativa ciudadana independiente — <strong>no es una fuente oficial del Gobierno de Colombia</strong>.
-  Para emergencias llama a la línea <a href="tel:123">123</a>.
+<div class="disclaimer" role="note" aria-label="Aviso">
+  <div class="ticker">
+    <div class="ticker-track">
+      <span class="ticker-item">Iniciativa ciudadana independiente — <strong>no es una fuente oficial del Gobierno de Colombia</strong>. Para emergencias llama a la línea <a href="tel:123">123</a>. &nbsp;·&nbsp; <span class="creditos">Mantenido gracias a @0xpwn3ds4b y @belosmaki</span> &nbsp;·&nbsp;</span>
+      <span class="ticker-item" aria-hidden="true">Iniciativa ciudadana independiente — <strong>no es una fuente oficial del Gobierno de Colombia</strong>. Para emergencias llama a la línea 123. &nbsp;·&nbsp; <span class="creditos">Mantenido gracias a @0xpwn3ds4b y @belosmaki</span> &nbsp;·&nbsp;</span>
+    </div>
+  </div>
 </div>
 
 <header class="top">

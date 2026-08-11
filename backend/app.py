@@ -247,7 +247,7 @@ def cors(resp):
 # otros orígenes y limita a dónde se puede exfiltrar (connect-src 'self'). Los
 # tiles del mapa vienen de openstreetmap.org; el favicon es un data: URI.
 _CSP = ("default-src 'self'; "
-        "img-src 'self' data: https://*.tile.openstreetmap.org; "
+        "img-src 'self' data: blob: https://*.tile.openstreetmap.org; "
         "style-src 'self' 'unsafe-inline'; "
         "script-src 'self' 'unsafe-inline'; "
         "connect-src 'self'; font-src 'self'; "

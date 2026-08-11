@@ -64,6 +64,9 @@ TIPOS = ("dano", "desaparecido", "donacion", "hospital", "mascota")
 SEVERIDADES = ("leve", "moderado", "grave", "colapso")
 NECESIDADES = ("agua", "alimentos", "medicamentos", "ropa", "cobijas", "aseo", "otros")
 TIPOS_AYUDA = ("herramientas", "maquinaria", "personas")
+# 'donacion' agrupa las ayudas; el subtipo (en extras, NO en la columna tipo)
+# distingue punto de acopio de refugio sin tocar el esquema ni migrar filas.
+SERVICIOS_REFUGIO = ("agua", "comida", "dormida", "banos", "medica", "electricidad")
 
 # ─── SQLite ───────────────────────────────────────────────────────────────────
 
@@ -476,16 +479,48 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
             return None, "El teléfono del hospital es obligatorio (mínimo 7 dígitos)"
 
     elif tipo == "donacion":
-        if not isinstance(extras_in.get("necesidades"), list):
-            return None, "necesidades debe ser una lista"
-        necesidades = _lista_abierta(extras_in["necesidades"], NECESIDADES)
-        if not necesidades:
-            return None, "Indica al menos un insumo necesario"
-        extras["necesidades"] = necesidades
-        if extras_in.get("nombre_punto"):
-            extras["nombre_punto"] = _texto(extras_in["nombre_punto"], 120)
-        if extras_in.get("horario"):
-            extras["horario"] = _texto(extras_in["horario"], 120)
+        # subtipo dentro de extras: los reportes viejos sin él son 'acopio'
+        subtipo = (extras_in.get("subtipo")
+                   if extras_in.get("subtipo") in ("acopio", "refugio") else "acopio")
+        extras["subtipo"] = subtipo
+        if subtipo == "refugio":
+            nombre = _texto(extras_in.get("nombre_punto"), 120)
+            if not nombre:
+                return None, "El nombre o referencia del refugio es obligatorio"
+            extras["nombre_punto"] = nombre
+            if extras_in.get("capacidad") not in (None, ""):
+                try:
+                    cap = int(extras_in["capacidad"])
+                except (TypeError, ValueError):
+                    return None, "Capacidad inválida"
+                if not 0 <= cap <= 100000:
+                    return None, "Capacidad inválida"
+                extras["capacidad"] = cap
+            servicios = _lista_abierta(extras_in.get("servicios"), SERVICIOS_REFUGIO)
+            if servicios:
+                extras["servicios"] = servicios
+            if extras_in.get("admite_mascotas") is not None:
+                extras["admite_mascotas"] = bool(extras_in["admite_mascotas"])
+            if extras_in.get("horario"):
+                extras["horario"] = _texto(extras_in["horario"], 120)
+            # teléfono del refugio: público y OPCIONAL (va en extras, no en la
+            # columna protegida). Si viene, se valida mínimo.
+            tel = _texto(extras_in.get("telefono"), 30)
+            if tel:
+                if len("".join(c for c in tel if c.isdigit())) < 7:
+                    return None, "El teléfono del refugio no parece válido"
+                extras["telefono"] = tel
+        else:  # acopio (donaciones) — como estaba
+            if not isinstance(extras_in.get("necesidades"), list):
+                return None, "necesidades debe ser una lista"
+            necesidades = _lista_abierta(extras_in["necesidades"], NECESIDADES)
+            if not necesidades:
+                return None, "Indica al menos un insumo necesario"
+            extras["necesidades"] = necesidades
+            if extras_in.get("nombre_punto"):
+                extras["nombre_punto"] = _texto(extras_in["nombre_punto"], 120)
+            if extras_in.get("horario"):
+                extras["horario"] = _texto(extras_in["horario"], 120)
 
     canal = data.get("canal") if data.get("canal") in ("web", "whatsapp") else "web"
 
@@ -634,6 +669,12 @@ def listar_reportes():
     if request.args.get("resuelto") in ("0", "1"):
         filtros.append("resuelto=?")
         params.append(int(request.args["resuelto"]))
+    # subtipo de ayuda (acopio | refugio) vía json_extract, parametrizado
+    if request.args.get("subtipo") in ("acopio", "refugio"):
+        if request.args["subtipo"] == "refugio":
+            filtros.append("json_extract(extras,'$.subtipo')='refugio'")
+        else:
+            filtros.append("COALESCE(json_extract(extras,'$.subtipo'),'acopio')!='refugio'")
     if request.args.get("desde"):
         filtros.append("creado_en >= ?")
         params.append(request.args["desde"])
@@ -1012,13 +1053,20 @@ def metricas():
             por_tipo[f["tipo"]] = f["n"]
         encontrados = conn.execute("SELECT COUNT(*) FROM reportes"
                                    " WHERE estado='visible' AND resuelto=1").fetchone()[0]
+        # ayudas divididas por subtipo (json_extract, sin columna nueva)
+        ayuda = conn.execute(
+            "SELECT"
+            " SUM(CASE WHEN json_extract(extras,'$.subtipo')='refugio' THEN 1 ELSE 0 END) refugios,"
+            " SUM(CASE WHEN COALESCE(json_extract(extras,'$.subtipo'),'acopio')!='refugio' THEN 1 ELSE 0 END) acopios"
+            " FROM reportes WHERE estado='visible' AND resuelto=0 AND tipo='donacion'").fetchone()
         por_ciudad = [dict(f) for f in conn.execute(
             "SELECT departamento, ciudad, COUNT(*) n FROM reportes"
             " WHERE estado='visible' GROUP BY departamento, ciudad ORDER BY n DESC")]
         ult24 = conn.execute("SELECT COUNT(*) FROM reportes WHERE estado='visible'"
                              " AND creado_en >= datetime('now','-1 day')").fetchone()[0]
     return jsonify({"por_tipo": por_tipo, "por_ciudad": por_ciudad,
-                    "ultimas_24h": ult24, "encontrados": encontrados})
+                    "ultimas_24h": ult24, "encontrados": encontrados,
+                    "acopios": ayuda["acopios"] or 0, "refugios": ayuda["refugios"] or 0})
 
 
 @app.get("/static/<path:fname>")
@@ -1165,14 +1213,15 @@ def admin_exportar():
                      "necesidades", "horario", "hospital", "reportante_nombre",
                      "reportante_cargo", "sexo", "edad_aprox", "estado_salud",
                      "senas_particulares", "ropa", "fecha_ingreso",
-                     "nombre_mascota", "especie", "raza", "situacion"]
+                     "nombre_mascota", "especie", "raza", "situacion",
+                     "subtipo", "capacidad", "servicios", "admite_mascotas", "telefono"]
     w = csv.writer(buf, delimiter=";")  # ';' — Excel es-CO
     w.writerow(["id", "tipo", "departamento", "ciudad", "direccion", "lat", "lng",
                 "ubicacion_ajustada", "descripcion", "telefono_contacto", "estado",
                 "canal", "creado_en", "moderado_en", "moderado_por"] + campos_extras)
     for f in filas:
         extras = json.loads(f["extras"] or "{}")
-        for lista in ("necesidades", "ayuda_tipos"):
+        for lista in ("necesidades", "ayuda_tipos", "servicios"):
             if isinstance(extras.get(lista), list):
                 extras[lista] = ", ".join(extras[lista])
         w.writerow([f["id"], f["tipo"], f["departamento"], f["ciudad"], f["direccion"],

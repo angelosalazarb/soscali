@@ -314,7 +314,7 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
     <button class="chip" data-tipo="" aria-pressed="true">Todos</button>
     <button class="chip" data-tipo="dano" aria-pressed="false">Daños</button>
     <button class="chip" data-tipo="desaparecido,hospital" aria-pressed="false">Desaparecidos</button>
-    <button class="chip" data-tipo="donacion" aria-pressed="false">Donaciones</button>
+    <button class="chip" data-tipo="donacion" aria-pressed="false">Ayudas</button>
     <button class="chip" data-tipo="mascota" aria-pressed="false">Mascotas</button>
     <button class="chip" data-tipo="" data-resuelto="1" aria-pressed="false">Encontrados</button>
   </div>
@@ -338,7 +338,8 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
     <span><i class="punto" style="background:#bc6e56"></i> Daño moderado</span>
     <span><i class="punto" style="background:#075d4d"></i> Daño leve</span>
     <span><i class="punto" style="background:#271d67"></i> Desaparecido</span>
-    <span><i class="punto" style="background:#00332a"></i> Punto de donación</span>
+    <span><i class="punto" style="background:#00332a"></i> Punto de acopio</span>
+    <span><i class="punto" style="background:#075d4d"></i> Refugio</span>
   </div>
   <div class="fila-lista">
     <button class="chip" id="btn-alternar-lista" aria-pressed="true">Ocultar lista</button>
@@ -571,38 +572,78 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
 </section>
 
 <!-- ═══ VISTA: DONACIONES ═══ -->
-<section data-vista="donaciones" aria-label="Reportar punto de donación">
+<section data-vista="donaciones" aria-label="Reportar una ayuda">
   <form id="form-donacion" novalidate>
+    <label>¿Qué quieres registrar? <span class="req" aria-hidden="true">*</span></label>
+    <div class="chips" id="don-subtipo" role="group" aria-label="Tipo de ayuda">
+      <button type="button" class="chip" data-valor="acopio" aria-pressed="true">Punto de acopio / donaciones</button>
+      <button type="button" class="chip" data-valor="refugio" aria-pressed="false">Refugio</button>
+    </div>
+
     <div class="paso" data-stepper="donacion"></div>
 
-    <label for="don-nombre">Nombre del punto (opcional)</label>
-    <input type="text" id="don-nombre" maxlength="120" placeholder="Ej.: Coliseo del barrio, parroquia, colegio…">
+    <!-- ─── Campos de PUNTO DE ACOPIO ─── -->
+    <div id="don-campos-acopio">
+      <label for="don-nombre">Nombre del punto (opcional)</label>
+      <input type="text" id="don-nombre" maxlength="120" placeholder="Ej.: Coliseo del barrio, parroquia, colegio…">
 
-    <label>¿Qué insumos se necesitan? <span class="req" aria-hidden="true">*</span></label>
-    <div class="chips" id="don-necesidades" role="group" aria-label="Insumos necesarios">
-      <button type="button" class="chip" data-valor="agua" aria-pressed="false">Agua</button>
-      <button type="button" class="chip" data-valor="alimentos" aria-pressed="false">Alimentos</button>
-      <button type="button" class="chip" data-valor="medicamentos" aria-pressed="false">Medicamentos</button>
-      <button type="button" class="chip" data-valor="ropa" aria-pressed="false">Ropa</button>
-      <button type="button" class="chip" data-valor="cobijas" aria-pressed="false">Cobijas</button>
-      <button type="button" class="chip" data-valor="aseo" aria-pressed="false">Kit de aseo</button>
-      <button type="button" class="chip" data-valor="otros" aria-pressed="false">Otros</button>
+      <label>¿Qué insumos se necesitan? <span class="req" aria-hidden="true">*</span></label>
+      <div class="chips" id="don-necesidades" role="group" aria-label="Insumos necesarios">
+        <button type="button" class="chip" data-valor="agua" aria-pressed="false">Agua</button>
+        <button type="button" class="chip" data-valor="alimentos" aria-pressed="false">Alimentos</button>
+        <button type="button" class="chip" data-valor="medicamentos" aria-pressed="false">Medicamentos</button>
+        <button type="button" class="chip" data-valor="ropa" aria-pressed="false">Ropa</button>
+        <button type="button" class="chip" data-valor="cobijas" aria-pressed="false">Cobijas</button>
+        <button type="button" class="chip" data-valor="aseo" aria-pressed="false">Kit de aseo</button>
+        <button type="button" class="chip" data-valor="otros" aria-pressed="false">Otros</button>
+      </div>
+      <p class="error-campo" id="err-don-nec">Selecciona al menos un insumo.</p>
     </div>
-    <p class="error-campo" id="err-don-nec">Selecciona al menos un insumo.</p>
 
-    <label for="don-horario">Horario de recepción</label>
-    <input type="text" id="don-horario" maxlength="120" placeholder="Ej.: todos los días 8 a.m. – 6 p.m.">
+    <!-- ─── Campos de REFUGIO ─── -->
+    <div id="don-campos-refugio" class="oculto">
+      <label for="ref-nombre">Nombre o referencia del refugio <span class="req" aria-hidden="true">*</span></label>
+      <input type="text" id="ref-nombre" maxlength="120" placeholder="Ej.: Refugio Coliseo El Pueblo, albergue de la parroquia…">
+      <p class="error-campo" id="err-ref-nombre">Escribe el nombre o una referencia del refugio.</p>
+
+      <label for="ref-capacidad">Capacidad (cupos disponibles)</label>
+      <input type="number" id="ref-capacidad" min="0" max="100000" inputmode="numeric" placeholder="Ej.: 200">
+
+      <label>¿Qué servicios ofrece?</label>
+      <div class="chips" id="ref-servicios" role="group" aria-label="Servicios del refugio">
+        <button type="button" class="chip" data-valor="agua" aria-pressed="false">Agua</button>
+        <button type="button" class="chip" data-valor="comida" aria-pressed="false">Comida</button>
+        <button type="button" class="chip" data-valor="dormida" aria-pressed="false">Dónde dormir</button>
+        <button type="button" class="chip" data-valor="banos" aria-pressed="false">Baños / duchas</button>
+        <button type="button" class="chip" data-valor="medica" aria-pressed="false">Atención médica</button>
+        <button type="button" class="chip" data-valor="electricidad" aria-pressed="false">Electricidad</button>
+      </div>
+
+      <label>¿Admite mascotas?</label>
+      <div class="chips" id="ref-mascotas" role="group">
+        <button type="button" class="chip" data-valor="si" aria-pressed="false">Sí</button>
+        <button type="button" class="chip" data-valor="no" aria-pressed="false">No</button>
+        <button type="button" class="chip" data-valor="" aria-pressed="true">No se sabe</button>
+      </div>
+
+      <label for="ref-tel">Teléfono de contacto (opcional, público)</label>
+      <input type="tel" id="ref-tel" maxlength="30" inputmode="tel" placeholder="Ej.: 602 555 7777">
+      <p class="ayuda">Si lo pones, se mostrará en el detalle para que la gente pueda llamar directo.</p>
+    </div>
+
+    <label for="don-horario">Horario</label>
+    <input type="text" id="don-horario" maxlength="120" placeholder="Ej.: 24 horas · o todos los días 8 a.m. – 6 p.m.">
 
     <label for="don-desc">Información adicional</label>
-    <textarea id="don-desc" maxlength="1000" placeholder="Persona de contacto en el punto, indicaciones para llegar…"></textarea>
+    <textarea id="don-desc" maxlength="1000" placeholder="Persona de contacto, indicaciones para llegar…"></textarea>
 
-    <label for="don-foto">Foto o flyer del punto</label>
+    <label for="don-foto">Foto o flyer</label>
     <input type="file" id="don-foto" accept="image/*">
-    <p class="ayuda">Sube el flyer de la campaña o una foto del punto para que la gente lo reconozca. Se comprime automáticamente.</p>
+    <p class="ayuda">Sube el flyer o una foto del lugar para que la gente lo reconozca. Se comprime automáticamente.</p>
     <div id="don-foto-prev"></div>
 
     <input class="honeypot" type="text" name="sitio_web" tabindex="-1" autocomplete="off" aria-hidden="true">
-    <div class="paso"><button type="submit" class="btn primario bloque">Registrar punto de donación</button></div>
+    <div class="paso"><button type="submit" class="btn primario bloque" id="don-submit">Registrar punto de acopio</button></div>
   </form>
   <div class="form-exito oculto" id="exito-donacion"></div>
 </section>
@@ -698,7 +739,7 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
   </a>
   <a href="#/donaciones" data-nav="donaciones">
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.51 4.04 3 5.5l7 7Z"/></svg>
-    Donaciones
+    Ayudas
   </a>
 </nav>
 
@@ -724,11 +765,15 @@ for (const [dep, cs] of Object.entries(CATALOGO))
 const TIPO_META = {
   dano:         {nombre:'Daño estructural',   color:'#bc6e56'},
   desaparecido: {nombre:'Persona desaparecida', color:'#271d67'},
-  donacion:     {nombre:'Punto de donación',  color:'#00332a'},
+  donacion:     {nombre:'Punto de acopio',    color:'#00332a'},
   hospital:     {nombre:'Paciente sin identificar', color:'#271d67'},
   mascota:      {nombre:'Mascota perdida', color:'#3d2e8a'},
 };
 const ESTADO_SALUD = {consciente:'Consciente', inconsciente:'Inconsciente', estable:'Estable', delicado:'Delicado', uci:'En UCI'};
+const SERVICIO_NOMBRE = {agua:'Agua', comida:'Comida', dormida:'Dónde dormir', banos:'Baños/duchas', medica:'Atención médica', electricidad:'Electricidad'};
+const esRefugio = r => r.tipo === 'donacion' && r.extras && r.extras.subtipo === 'refugio';
+const claveIcono = r => esRefugio(r) ? 'refugio' : r.tipo;
+const nombreTipo = r => esRefugio(r) ? 'Refugio' : TIPO_META[r.tipo].nombre;
 const SEV_COLOR = {leve:'#075d4d', moderado:'#bc6e56', grave:'#692a27', colapso:'#692a27'};
 const SEV_NOMBRE = {leve:'Leve', moderado:'Moderado', grave:'Grave', colapso:'Colapso'};
 const NEC_NOMBRE = {agua:'Agua', alimentos:'Alimentos', medicamentos:'Medicamentos', ropa:'Ropa', cobijas:'Cobijas', aseo:'Kit de aseo', otros:'Otros'};
@@ -738,6 +783,7 @@ const ICONO = {
   dano: '<path d="M21.73 18l-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   desaparecido: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
   donacion: '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.51 4.04 3 5.5l7 7Z"/>',
+  refugio: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/>',
   hospital: '<path d="M11 3a1 1 0 0 0-1 1v5H5a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h5v5a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-5h5a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1h-5V4a1 1 0 0 0-1-1h-2Z"/>',
   mascota: '<circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="20" cy="16" r="2"/><path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 17.48 4.46 16.84A3.5 3.5 0 0 1 5.5 10Z"/>',
 };
@@ -746,6 +792,7 @@ function svgIcono(tipo, color, tam=18){
 }
 function colorReporte(r){
   if (r.resuelto) return '#075d4d';   // encontrado/reunido: verde esperanza
+  if (esRefugio(r)) return '#075d4d';   // refugio: verde, distinto del acopio
   return r.tipo === 'dano' ? (SEV_COLOR[r.extras.severidad] || '#bc6e56') : TIPO_META[r.tipo].color;
 }
 
@@ -856,7 +903,7 @@ function tituloReporte(r){
   return r.tipo === 'mascota' ? `${r.extras.nombre_mascota || 'Mascota'} — ${r.extras.especie || 'perdida'}`
        : r.tipo === 'desaparecido' ? (r.extras.nombre || 'Persona desaparecida')
        : r.tipo === 'hospital' ? `Paciente sin identificar — ${r.extras.hospital || 'hospital'}`
-       : r.tipo === 'donacion' ? (r.extras.nombre_punto || 'Punto de donación')
+       : r.tipo === 'donacion' ? (r.extras.nombre_punto || (esRefugio(r) ? 'Refugio' : 'Punto de acopio'))
        : `Daño ${SEV_NOMBRE[r.extras.severidad] || ''}`.trim();
 }
 
@@ -914,7 +961,7 @@ const TITULOS = {
   mapa: ['Mapa de afectaciones', 'Reportes ciudadanos en toda Colombia'],
   danos: ['Reportar daño estructural', 'Ubica el lugar y describe el daño. Si hay personas atrapadas llama primero al 123.'],
   desaparecidos: ['Desaparecidos', 'Personas buscadas por su familia, pacientes sin identificar en hospitales y mascotas perdidas.'],
-  donaciones: ['Punto de donación', 'Registra dónde se reciben donaciones y qué insumos se necesitan.'],
+  donaciones: ['Ayudas', 'Puntos de acopio de donaciones y refugios disponibles.'],
 };
 function ruta(){
   const h = (location.hash || '#/mapa').replace('#/','');
@@ -997,9 +1044,9 @@ const Mapa = (function(){
     const color = colorReporte(r);
     const icono = L.divIcon({
       className: '', iconSize: [34,34], iconAnchor: [17,17],
-      html: `<div class="pin-sos" style="background:${color}">${svgIcono(r.tipo, '#fff', 17)}</div>`,
+      html: `<div class="pin-sos" style="background:${color}">${svgIcono(claveIcono(r), '#fff', 17)}</div>`,
     });
-    return L.marker([r.lat, r.lng], {icon: icono, keyboard: true, title: TIPO_META[r.tipo].nombre + ' — ' + r.ciudad})
+    return L.marker([r.lat, r.lng], {icon: icono, keyboard: true, title: nombreTipo(r) + ' — ' + r.ciudad})
             .on('click', () => Detalle.abrir(r));
   }
 
@@ -1023,8 +1070,13 @@ const Mapa = (function(){
       const dirSub = esDano ? '' : (r.direccion ? ' · ' + esc(r.direccion) : '');
       // qué se necesita, visible desde la lista sin abrir el detalle
       let necesita = '';
-      if (r.tipo === 'donacion' && (r.extras.necesidades || []).length)
+      if (r.tipo === 'donacion' && !esRefugio(r) && (r.extras.necesidades || []).length)
         necesita = 'Se necesita: ' + r.extras.necesidades.map(n => NEC_NOMBRE[n] || n).join(', ');
+      if (esRefugio(r)) {
+        const s = (r.extras.servicios || []).map(x => SERVICIO_NOMBRE[x] || x);
+        necesita = 'Refugio' + (r.extras.capacidad != null ? ` · ${r.extras.capacidad} cupos` : '')
+                 + (s.length ? ' · ' + s.join(', ') : '');
+      }
       if (r.tipo === 'dano' && r.extras.necesita_ayuda)
         necesita = 'Necesita ayuda: ' + ((r.extras.ayuda_tipos || []).map(t => AYUDA_NOMBRE[t] || t).join(', ') || 'ver detalle');
       el.innerHTML = `${r.fotos
@@ -1052,7 +1104,8 @@ const Mapa = (function(){
         <div class="metrica"><span class="valor">${m.por_tipo.dano}</span><span class="nombre">${svgIcono('dano','#bc6e56',14)} Daños reportados</span></div>
         <div class="metrica"><span class="valor">${m.por_tipo.desaparecido}</span><span class="nombre">${svgIcono('desaparecido','#271d67',14)} Desaparecidos</span></div>
         <div class="metrica"><span class="valor">${m.por_tipo.hospital || 0}</span><span class="nombre">${svgIcono('hospital','#271d67',14)} Sin identificar (hospitales)</span></div>
-        <div class="metrica"><span class="valor">${m.por_tipo.donacion}</span><span class="nombre">${svgIcono('donacion','#00332a',14)} Puntos de donación</span></div>
+        <div class="metrica"><span class="valor">${m.acopios || 0}</span><span class="nombre">${svgIcono('donacion','#00332a',14)} Puntos de acopio</span></div>
+        <div class="metrica"><span class="valor">${m.refugios || 0}</span><span class="nombre">${svgIcono('refugio','#075d4d',14)} Refugios</span></div>
         <div class="metrica"><span class="valor">${m.por_tipo.mascota || 0}</span><span class="nombre">${svgIcono('mascota','#3d2e8a',14)} Mascotas perdidas</span></div>
         <div class="metrica"><span class="valor">${m.ultimas_24h}</span><span class="nombre">Últimas 24 horas</span></div>
         <div class="metrica"><span class="valor" style="color:var(--esmeralda)">${m.encontrados || 0}</span><span class="nombre">Encontrados</span></div>`;
@@ -1141,12 +1194,12 @@ const Detalle = (function(){
     const color = colorReporte(r);
     let html = `<div style="display:flex;align-items:center;gap:10px;margin-top:4px">
       <span class="pin-sos" style="background:${color};width:40px;height:40px;display:grid;place-items:center">${svgIcono(r.tipo,'#fff',19)}</span>
-      <div><p class="eyebrow">${TIPO_META[r.tipo].nombre}</p>
+      <div><p class="eyebrow">${nombreTipo(r)}</p>
       <h3 id="sheet-titulo" style="font-family:var(--serif);font-weight:400;font-size:20px">${
         esc(r.tipo === 'desaparecido' ? (r.extras.nombre || '—')
           : r.tipo === 'hospital' ? (r.extras.hospital || 'Hospital')
           : r.tipo === 'mascota' ? (r.extras.nombre_mascota || 'Mascota perdida')
-          : r.tipo === 'donacion' ? (r.extras.nombre_punto || 'Punto de donación')
+          : r.tipo === 'donacion' ? (r.extras.nombre_punto || (esRefugio(r) ? 'Refugio' : 'Punto de acopio'))
           : (r.ciudad + ' — daño ' + (SEV_NOMBRE[r.extras.severidad]||'').toLowerCase()))}</h3></div></div>`;
     if (r.fotos) {
       const altFoto = {dano:'Foto del daño', donacion:'Foto o flyer del punto de donación',
@@ -1187,10 +1240,24 @@ const Detalle = (function(){
             + fila('Ropa y pertenencias', r.extras.ropa)
             + fila('Ingresó', r.extras.fecha_ingreso);
     }
-    if (r.tipo === 'donacion') {
+    if (r.tipo === 'donacion' && !esRefugio(r)) {
       const nec = (r.extras.necesidades || []).map(n => `<span class="badge tipo-donacion">${NEC_NOMBRE[n] || esc(n)}</span>`).join(' ');
       html += `<div class="dato"><div class="clave">Se necesita</div><div class="valor-d">${nec || '—'}</div></div>`
             + fila('Horario', r.extras.horario);
+    }
+    if (esRefugio(r)) {
+      const serv = (r.extras.servicios || []).map(x => `<span class="badge tipo-donacion">${SERVICIO_NOMBRE[x] || esc(x)}</span>`).join(' ');
+      html += `<div style="margin-top:10px"><span class="badge tipo-donacion">Refugio</span>${
+        r.extras.admite_mascotas === true ? ' <span class="badge tipo-desaparecido">Admite mascotas</span>'
+          : r.extras.admite_mascotas === false ? ' <span class="badge">No admite mascotas</span>' : ''}</div>`
+            + fila('Capacidad', r.extras.capacidad != null ? r.extras.capacidad + ' cupos' : '')
+            + (serv ? `<div class="dato"><div class="clave">Servicios</div><div class="valor-d">${serv}</div></div>` : '')
+            + fila('Horario', r.extras.horario);
+      if (r.extras.telefono) {
+        const tel = r.extras.telefono;
+        html += `<a class="btn primario bloque" style="margin-top:12px" href="tel:${esc(tel.replace(/[^+\d]/g,''))}">
+          ${svgIcono('refugio','currentColor',18)} Llamar al refugio · ${esc(tel)}</a>`;
+      }
     }
     html += fila('Ubicación', `${r.ciudad}, ${r.departamento}${r.direccion ? ' — ' + r.direccion : ''}`)
           + fila('Descripción', r.descripcion)
@@ -1783,21 +1850,49 @@ $('#form-mascota').addEventListener('submit', async e => {
     estado === 'enviado' ? 'Mascota reportada' : 'Reporte en cola de envío');
 });
 
-/* ═══ Formulario: donaciones ═══ */
+/* ═══ Formulario: ayudas (acopio / refugio) ═══ */
 const fotoDon = montarFoto('#don-foto', '#don-foto-prev');
 const leerNec = chipsMulti('#don-necesidades');
+const leerSubtipo = chipUnico('#don-subtipo');
+const leerServicios = chipsMulti('#ref-servicios');
+const leerAdmiteMascotas = chipUnico('#ref-mascotas');
+// el selector acopio/refugio muestra u oculta cada bloque de campos
+$('#don-subtipo').addEventListener('click', () => {
+  const esRefugio = leerSubtipo() === 'refugio';
+  $('#don-campos-acopio').classList.toggle('oculto', esRefugio);
+  $('#don-campos-refugio').classList.toggle('oculto', !esRefugio);
+  $('#don-submit').textContent = esRefugio ? 'Registrar refugio' : 'Registrar punto de acopio';
+});
 $('#form-donacion').addEventListener('submit', async e => {
   e.preventDefault();
   const ubic = Stepper.leer('donacion'); if (!ubic) return;
-  const nec = leerNec();
-  if (!nec.length) { $('#err-don-nec').classList.add('visible'); return; }
-  $('#err-don-nec').classList.remove('visible');
+  const subtipo = leerSubtipo() || 'acopio';
+  let extras;
+  if (subtipo === 'refugio') {
+    const nombre = $('#ref-nombre').value.trim();
+    if (!nombre) { $('#err-ref-nombre').classList.add('visible'); $('#ref-nombre').focus(); return; }
+    $('#err-ref-nombre').classList.remove('visible');
+    const cap = $('#ref-capacidad').value;
+    const am = leerAdmiteMascotas();
+    extras = { subtipo: 'refugio', nombre_punto: nombre,
+               capacidad: cap === '' ? null : Number(cap),
+               servicios: leerServicios(),
+               admite_mascotas: am === '' ? null : am === 'si',
+               horario: $('#don-horario').value.trim(),
+               telefono: $('#ref-tel').value.trim() };
+  } else {
+    const nec = leerNec();
+    if (!nec.length) { $('#err-don-nec').classList.add('visible'); return; }
+    $('#err-don-nec').classList.remove('visible');
+    extras = { subtipo: 'acopio', necesidades: nec,
+               nombre_punto: $('#don-nombre').value.trim(),
+               horario: $('#don-horario').value.trim() };
+  }
   const payload = {
     id: crypto.randomUUID(), tipo: 'donacion', ...ubic,
     descripcion: $('#don-desc').value.trim(),
     foto: fotoDon.valor(),
-    extras: { necesidades: nec, nombre_punto: $('#don-nombre').value.trim(),
-              horario: $('#don-horario').value.trim() },
+    extras,
     sitio_web: e.target.querySelector('.honeypot').value,
   };
   const btn = e.target.querySelector('[type="submit"]'); btn.disabled = true;
@@ -1805,14 +1900,16 @@ $('#form-donacion').addEventListener('submit', async e => {
   if (sim.accion === 'confirmado') {
     btn.disabled = false; Stepper.reset('donacion'); fotoDon.reset();
     pantallaExito('#exito-donacion', '#form-donacion',
-      `Confirmado — ${sim.confirmaciones} personas han reportado este punto`);
+      `Confirmado — ${sim.confirmaciones} personas han reportado esto`);
     return;
   }
   const estado = await enviarReporte(payload); btn.disabled = false;
   if (estado === 'error') return;
   Stepper.reset('donacion'); fotoDon.reset();
   pantallaExito('#exito-donacion', '#form-donacion',
-    estado === 'enviado' ? 'Punto registrado' : 'Registro en cola de envío');
+    estado === 'enviado'
+      ? (subtipo === 'refugio' ? 'Refugio registrado' : 'Punto de acopio registrado')
+      : 'Registro en cola de envío');
 });
 
 /* ═══ Arranque ═══ */

@@ -151,6 +151,14 @@ label .req{color:var(--error)}
 .pin-sos svg{display:block}
 
 /* ─── Lista fallback ─── */
+.fila-lista{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:10px 0 0}
+#buscar-reportes{
+  flex:1;min-width:170px;min-height:44px;padding:8px 16px;
+  font-family:var(--sans);font-size:15px;color:var(--tinta);background:var(--card);
+  border:1.5px solid var(--border);border-radius:100px;
+  transition:border-color var(--trans);
+}
+#buscar-reportes:focus{border-color:var(--indigo);outline:none}
 #lista-reportes{display:none;flex-direction:column;gap:10px;margin-top:10px}
 #lista-reportes.visible{display:flex}
 .item-reporte{display:flex;gap:12px;align-items:flex-start;cursor:pointer}
@@ -328,7 +336,10 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
     <span><i class="punto" style="background:#271d67"></i> Desaparecido</span>
     <span><i class="punto" style="background:#00332a"></i> Punto de donación</span>
   </div>
-  <button class="chip" id="btn-alternar-lista" aria-pressed="true">Ocultar lista</button>
+  <div class="fila-lista">
+    <button class="chip" id="btn-alternar-lista" aria-pressed="true">Ocultar lista</button>
+    <input type="search" id="buscar-reportes" placeholder="Buscar nombre, dirección, raza…" aria-label="Buscar en los reportes" autocomplete="off">
+  </div>
   <div id="lista-reportes" class="visible" role="list"></div>
 </section>
 
@@ -926,8 +937,21 @@ window.addEventListener('hashchange', navegar);
 
 /* ═══ Mapa principal ═══ */
 const Mapa = (function(){
-  let mapa = null, capa = null, reportes = [];
+  let mapa = null, capa = null, reportes = [], busqueda = '';
   const filtro = { tipo:'', departamento:'', ciudad:'', fecha:'', resuelto:'' };
+
+  // texto buscable de un reporte: título, ubicación y TODOS los campos de
+  // extras (nombre, raza, especie, hospital, insumos…) + la última nota
+  function textoBuscable(r){
+    const partes = [tituloReporte(r), r.ciudad, r.departamento, r.direccion,
+                    r.descripcion, r.ultima_nota];
+    for (const v of Object.values(r.extras || {})) {
+      if (Array.isArray(v)) partes.push(v.join(' '));
+      else if (v != null && typeof v !== 'object') partes.push(String(v));
+    }
+    return normTexto(partes.filter(Boolean).join(' '));
+  }
+  const visibles = () => busqueda ? reportes.filter(r => textoBuscable(r).includes(busqueda)) : reportes;
 
   function asegurar(){
     if (mapa) { mapa.invalidateSize(); return; }
@@ -976,12 +1000,14 @@ const Mapa = (function(){
   }
 
   function pintar(){
-    if (capa) { capa.clearLayers(); reportes.forEach(r => capa.addLayer(marker(r))); }
+    const vis = visibles();
+    if (capa) { capa.clearLayers(); vis.forEach(r => capa.addLayer(marker(r))); }
     // lista (fallback y preferencia)
     const cont = $('#lista-reportes');
-    cont.innerHTML = reportes.length ? '' :
-      '<div class="card" style="text-align:center;color:var(--muted)">Aún no hay reportes con estos filtros.</div>';
-    reportes.forEach(r => {
+    cont.innerHTML = vis.length ? '' :
+      `<div class="card" style="text-align:center;color:var(--muted)">${
+        busqueda ? 'Ningún reporte coincide con tu búsqueda.' : 'Aún no hay reportes con estos filtros.'}</div>`;
+    vis.forEach(r => {
       const el = document.createElement('div');
       el.className = 'card item-reporte'; el.setAttribute('role','listitem'); el.tabIndex = 0;
       const titulo = tituloReporte(r);
@@ -1039,7 +1065,9 @@ const Mapa = (function(){
     }
   }
 
-  return { asegurar, recargar, enfocar, filtro };
+  function buscar(q){ busqueda = normTexto((q || '').trim()); pintar(); }
+
+  return { asegurar, recargar, enfocar, buscar, filtro };
 })();
 
 function fechaCorta(iso){
@@ -1060,6 +1088,21 @@ function fechaCorta(iso){
   });
   selC.addEventListener('change', () => { Mapa.filtro.ciudad = selC.value; Mapa.recargar(); Mapa.enfocar(); });
   $('#filtro-fecha').addEventListener('change', e => { Mapa.filtro.fecha = e.target.value; Mapa.recargar(); });
+  // búsqueda de texto (cliente): filtra los reportes ya cargados, con debounce
+  let tBusca = null;
+  $('#buscar-reportes').addEventListener('input', e => {
+    clearTimeout(tBusca);
+    const q = e.target.value;
+    tBusca = setTimeout(() => {
+      // al buscar, asegura la lista visible para ver los resultados
+      if (q.trim() && !$('#lista-reportes').classList.contains('visible')) {
+        $('#lista-reportes').classList.add('visible');
+        $('#btn-alternar-lista').textContent = 'Ocultar lista';
+        $('#btn-alternar-lista').setAttribute('aria-pressed', 'true');
+      }
+      Mapa.buscar(q);
+    }, 180);
+  });
   $('#filtro-tipo').addEventListener('click', e => {
     const btn = e.target.closest('.chip'); if (!btn) return;
     $$('#filtro-tipo .chip').forEach(c => c.setAttribute('aria-pressed', c === btn ? 'true' : 'false'));

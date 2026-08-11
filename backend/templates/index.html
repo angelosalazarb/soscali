@@ -869,20 +869,41 @@ async function enviarReporte(payload){
 }
 
 /* ═══ Foto opcional (desaparecidos y pacientes): comprimida en el navegador ═══ */
-function comprimirFoto(file){
-  return new Promise((resolver, rechazar) => {
+// Carga <img> desde un Blob/File (fallback y para el JPEG ya convertido).
+function imgDesdeBlob(blob){
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(blob);
     const img = new Image();
-    img.onload = () => {
-      const escala = Math.min(1, 1024 / Math.max(img.width, img.height));
-      const c = document.createElement('canvas');
-      c.width = Math.round(img.width * escala); c.height = Math.round(img.height * escala);
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      URL.revokeObjectURL(img.src);
-      resolver(c.toDataURL('image/jpeg', 0.72));
-    };
-    img.onerror = rechazar;
-    img.src = URL.createObjectURL(file);
+    img.onload = () => { URL.revokeObjectURL(url); res(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('formato no soportado')); };
+    img.src = url;
   });
+}
+function esHEIC(file){
+  const t = (file.type || '').toLowerCase(), n = (file.name || '').toLowerCase();
+  return t.includes('heic') || t.includes('heif') || n.endsWith('.heic') || n.endsWith('.heif');
+}
+// Decodifica el archivo a algo dibujable en canvas. createImageBitmap respeta
+// la orientación EXIF (fotos de celular salían acostadas) y en iOS Safari —de
+// donde vienen las fotos HEIC de iPhone— las decodifica de forma nativa.
+// Fallback a <img> para navegadores viejos.
+async function decodificarImagen(file){
+  if (window.createImageBitmap) {
+    try { return await createImageBitmap(file, {imageOrientation: 'from-image'}); }
+    catch(e) { /* formato no soportado nativamente: seguir */ }
+  }
+  return await imgDesdeBlob(file);
+}
+async function comprimirFoto(file){
+  const bmp = await decodificarImagen(file);
+  const w = bmp.width, h = bmp.height;
+  if (!w || !h) throw new Error('imagen vacía');
+  const escala = Math.min(1, 1024 / Math.max(w, h));
+  const c = document.createElement('canvas');
+  c.width = Math.round(w * escala); c.height = Math.round(h * escala);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  if (bmp.close) bmp.close();
+  return c.toDataURL('image/jpeg', 0.72);
 }
 function montarFoto(inputSel, prevSel){
   const inp = $(inputSel), prev = $(prevSel);
@@ -893,7 +914,14 @@ function montarFoto(inputSel, prevSel){
     try {
       dataUrl = await comprimirFoto(file);
       prev.innerHTML = `<img src="${dataUrl}" alt="Vista previa de la foto" style="max-width:160px;border-radius:14px;border:1px solid var(--border);margin-top:8px">`;
-    } catch(e) { toast('No se pudo leer la foto; intenta con otra.', 'error'); inp.value = ''; }
+    } catch(e) {
+      console.warn('foto:', e);
+      const msg = esHEIC(file)
+        ? 'Esta foto es HEIC de iPhone y este navegador no la procesa. En el iPhone: Ajustes → Cámara → Formatos → “Más compatible”, o sube una captura de pantalla de la foto.'
+        : 'No se pudo procesar la foto; intenta con otra.';
+      toast(msg, 'error');
+      inp.value = '';
+    }
   });
   return { valor: () => dataUrl, reset: () => { inp.value = ''; prev.innerHTML = ''; dataUrl = null; } };
 }

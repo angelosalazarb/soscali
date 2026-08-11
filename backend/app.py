@@ -260,6 +260,10 @@ def cabeceras_seguridad(resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "no-referrer"
+    # el HTML no se cachea: tras un deploy el navegador toma la CSP y el JS
+    # nuevos sin necesidad de hard-reload (evita "desplegué pero sigue igual")
+    if resp.mimetype == "text/html":
+        resp.headers["Cache-Control"] = "no-cache"
     return resp
 
 

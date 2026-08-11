@@ -80,6 +80,7 @@ tr:last-child td{border-bottom:none}
 
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" aria-selected="true" data-tab="reportes">Reportes</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="notas">Notas / Avistamientos</button>
     <button class="tab" role="tab" aria-selected="false" data-tab="accesos">Accesos a teléfonos</button>
   </div>
 
@@ -92,6 +93,14 @@ tr:last-child td{border-bottom:none}
     </div>
     <div class="tabla-caja"><table id="t-reportes">
       <thead><tr><th>Fecha</th><th>Tipo</th><th>Ciudad</th><th>Detalle</th><th>Teléfono</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+
+  <div id="vista-notas" class="oculto2">
+    <p class="muted" style="margin-bottom:10px">Avistamientos y actualizaciones de zona aportados por la comunidad. Edita o borra los abusivos.</p>
+    <div class="tabla-caja"><table id="t-notas">
+      <thead><tr><th>Fecha</th><th>Reporte</th><th>Nota</th><th>IP</th><th>Acciones</th></tr></thead>
       <tbody></tbody>
     </table></div>
   </div>
@@ -147,8 +156,10 @@ $('#salir').addEventListener('click', mostrarLogin);
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
   document.querySelectorAll('.tab').forEach(x => x.setAttribute('aria-selected', x === t ? 'true' : 'false'));
   $('#vista-reportes').classList.toggle('oculto2', t.dataset.tab !== 'reportes');
+  $('#vista-notas').classList.toggle('oculto2', t.dataset.tab !== 'notas');
   $('#vista-accesos').classList.toggle('oculto2', t.dataset.tab !== 'accesos');
   if (t.dataset.tab === 'accesos') cargarAccesos();
+  if (t.dataset.tab === 'notas') cargarNotas();
 }));
 
 const SEV = {leve:'Leve', moderado:'Moderado', grave:'Grave', colapso:'Colapso'};
@@ -245,6 +256,43 @@ async function cargarAccesos(){
     tr.innerHTML = `<td>${esc((a.creado_en || '').slice(0,16))}</td><td>${esc(a.desaparecido || a.reporte_id)}</td>
       <td>${esc(a.nombre_solicitante || '—')}</td><td>${esc(a.ip || '')}</td>
       <td class="muted" style="max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(a.user_agent || '')}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+async function cargarNotas(){
+  let filas;
+  try { filas = await api('/api/admin/avistamientos'); }
+  catch(e) { toast(e.message); return; }
+  const tb = $('#t-notas tbody');
+  tb.innerHTML = filas.length ? '' : '<tr><td colspan="5" class="muted">Sin notas de la comunidad.</td></tr>';
+  filas.forEach(a => {
+    const tr = document.createElement('tr');
+    const estadoTxt = a.estado && a.estado !== 'visible' ? ` (${a.estado})` : '';
+    tr.innerHTML = `<td>${esc((a.creado_en || '').slice(0,16))}</td>
+      <td>${esc(a.reporte || a.reporte_id)}<br><span class="muted">${esc((TIPO[a.tipo] || a.tipo || '') + estadoTxt)}</span></td>
+      <td style="max-width:360px" data-nota></td>
+      <td class="muted">${esc(a.ip || '')}</td>
+      <td style="white-space:nowrap"></td>`;
+    tr.querySelector('[data-nota]').textContent = a.nota;   // textContent: nunca ejecuta HTML
+    const acciones = tr.lastElementChild;
+    const bEd = document.createElement('button');
+    bEd.className = 'btn mini'; bEd.textContent = 'Editar';
+    bEd.addEventListener('click', async () => {
+      const nuevo = prompt('Editar nota:', a.nota);
+      if (nuevo == null || nuevo.trim() === a.nota) return;
+      if (!nuevo.trim()) { toast('La nota no puede quedar vacía'); return; }
+      try { await api('/api/admin/avistamientos/' + a.id, {method:'PATCH', body: JSON.stringify({nota: nuevo.trim()})}); cargarNotas(); }
+      catch(e){ toast(e.message); }
+    });
+    const bDel = document.createElement('button');
+    bDel.className = 'btn mini peligro'; bDel.style.marginLeft = '6px'; bDel.textContent = 'Borrar';
+    bDel.addEventListener('click', async () => {
+      if (!confirm('¿Borrar esta nota? No se puede deshacer.')) return;
+      try { await api('/api/admin/avistamientos/' + a.id, {method:'DELETE'}); cargarNotas(); }
+      catch(e){ toast(e.message); }
+    });
+    acciones.append(bEd, bDel);
     tb.appendChild(tr);
   });
 }

@@ -239,6 +239,27 @@ def cors(resp):
     return resp
 
 
+# Content Security Policy: los scripts propios van inline (app sin build), así
+# que script-src necesita 'unsafe-inline'; aun así la CSP bloquea scripts de
+# otros orígenes y limita a dónde se puede exfiltrar (connect-src 'self'). Los
+# tiles del mapa vienen de openstreetmap.org; el favicon es un data: URI.
+_CSP = ("default-src 'self'; "
+        "img-src 'self' data: https://*.tile.openstreetmap.org; "
+        "style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; font-src 'self'; "
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+
+
+@app.after_request
+def cabeceras_seguridad(resp):
+    resp.headers["Content-Security-Policy"] = _CSP
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    return resp
+
+
 @app.route("/api/<path:_>", methods=["OPTIONS"])
 def cors_preflight(_):
     return "", 204
@@ -251,10 +272,31 @@ def cors_preflight(_):
 # barrera contra spam masivo, no contra un atacante dedicado.
 
 _hits: dict[str, deque] = defaultdict(deque)
+_ultima_purga = [0.0]          # holder mutable: última barrida global de _hits
+_VENTANA_MAX = 3600            # ninguna ventana de rate-limit supera 1 hora
+
+
+def _purgar_hits(ahora: float) -> None:
+    """Evita que _hits crezca sin límite en una emergencia larga: cada 5 min
+    barre todas las claves, descarta marcas más viejas que la ventana máxima
+    y elimina las colas vacías. Itera sobre una copia de las claves para no
+    chocar con los otros hilos de gunicorn."""
+    if ahora - _ultima_purga[0] < 300:
+        return
+    _ultima_purga[0] = ahora
+    for clave in list(_hits.keys()):
+        cola = _hits.get(clave)
+        if cola is None:
+            continue
+        while cola and ahora - cola[0] > _VENTANA_MAX:
+            cola.popleft()
+        if not cola:
+            _hits.pop(clave, None)
 
 
 def _rate_ok(clave: str, maximo: int, ventana_seg: int) -> bool:
     ahora = time.monotonic()
+    _purgar_hits(ahora)
     cola = _hits[clave]
     while cola and ahora - cola[0] > ventana_seg:
         cola.popleft()
@@ -1054,6 +1096,47 @@ def admin_accesos():
                              or extras.get("nombre_mascota", ""))
         out.append(d)
     return jsonify(out)
+
+
+@app.get("/api/admin/avistamientos")
+@auth.requiere_login(db)
+def admin_avistamientos():
+    """Todas las notas comunitarias (avistamientos y actualizaciones de zona)
+    con el reporte al que pertenecen, para moderar abusos."""
+    with db() as conn:
+        filas = conn.execute(
+            "SELECT a.id, a.reporte_id, a.nota, a.ip, a.creado_en,"
+            " r.tipo, r.ciudad, r.estado, r.extras"
+            " FROM avistamientos a LEFT JOIN reportes r ON r.id = a.reporte_id"
+            " ORDER BY a.creado_en DESC LIMIT 1000").fetchall()
+    out = []
+    for f in filas:
+        d = dict(f)
+        extras = json.loads(d.pop("extras") or "{}")
+        d["reporte"] = (extras.get("nombre") or extras.get("nombre_mascota")
+                        or extras.get("hospital")
+                        or f"{d.get('tipo') or 'reporte'} · {d.get('ciudad') or ''}".strip(" ·"))
+        out.append(d)
+    return jsonify(out)
+
+
+@app.patch("/api/admin/avistamientos/<int:aid>")
+@auth.requiere_login(db)
+def admin_editar_avistamiento(aid):
+    nota = _texto((request.get_json(silent=True) or {}).get("nota"), 300)
+    if not nota:
+        return jsonify({"error": "La nota no puede quedar vacía"}), 400
+    with db() as conn:
+        n = conn.execute("UPDATE avistamientos SET nota=? WHERE id=?", (nota, aid)).rowcount
+    return (jsonify({"ok": True}), 200) if n else (jsonify({"error": "No existe"}), 404)
+
+
+@app.delete("/api/admin/avistamientos/<int:aid>")
+@auth.requiere_login(db)
+def admin_borrar_avistamiento(aid):
+    with db() as conn:
+        n = conn.execute("DELETE FROM avistamientos WHERE id=?", (aid,)).rowcount
+    return (jsonify({"ok": True}), 200) if n else (jsonify({"error": "No existe"}), 404)
 
 
 @app.get("/api/admin/exportar.csv")

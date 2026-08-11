@@ -282,6 +282,7 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
     <button class="chip" data-tipo="desaparecido,hospital" aria-pressed="false">Desaparecidos</button>
     <button class="chip" data-tipo="donacion" aria-pressed="false">Donaciones</button>
     <button class="chip" data-tipo="mascota" aria-pressed="false">Mascotas</button>
+    <button class="chip" data-tipo="" data-resuelto="1" aria-pressed="false">Encontrados</button>
   </div>
   <div class="filtros-fila">
     <select id="filtro-depto" aria-label="Filtrar por departamento"><option value="">Departamento: todos</option></select>
@@ -904,7 +905,7 @@ window.addEventListener('hashchange', navegar);
 /* ═══ Mapa principal ═══ */
 const Mapa = (function(){
   let mapa = null, capa = null, reportes = [];
-  const filtro = { tipo:'', departamento:'', ciudad:'', fecha:'' };
+  const filtro = { tipo:'', departamento:'', ciudad:'', fecha:'', resuelto:'' };
 
   function asegurar(){
     if (mapa) { mapa.invalidateSize(); return; }
@@ -922,6 +923,7 @@ const Mapa = (function(){
   function params(){
     const p = new URLSearchParams();
     if (filtro.tipo) p.set('tipo', filtro.tipo);
+    if (filtro.resuelto) p.set('resuelto', filtro.resuelto);
     if (filtro.departamento) p.set('departamento', filtro.departamento);
     if (filtro.ciudad) p.set('ciudad', filtro.ciudad);
     if (filtro.fecha) {
@@ -1038,7 +1040,11 @@ function fechaCorta(iso){
   $('#filtro-tipo').addEventListener('click', e => {
     const btn = e.target.closest('.chip'); if (!btn) return;
     $$('#filtro-tipo .chip').forEach(c => c.setAttribute('aria-pressed', c === btn ? 'true' : 'false'));
-    Mapa.filtro.tipo = btn.dataset.tipo; Mapa.recargar();
+    // "Encontrados" filtra por estado resuelto en vez de por tipo (mutuamente
+    // excluyentes, como el resto de los chips)
+    Mapa.filtro.tipo = btn.dataset.tipo || '';
+    Mapa.filtro.resuelto = btn.dataset.resuelto || '';
+    Mapa.recargar();
   });
   const alternar = () => {
     const lista = $('#lista-reportes'), btn = $('#btn-alternar-lista');

@@ -631,6 +631,9 @@ def listar_reportes():
         if request.args.get(campo):
             filtros.append(f"{campo}=?")
             params.append(request.args[campo])
+    if request.args.get("resuelto") in ("0", "1"):
+        filtros.append("resuelto=?")
+        params.append(int(request.args["resuelto"]))
     if request.args.get("desde"):
         filtros.append("creado_en >= ?")
         params.append(request.args["desde"])

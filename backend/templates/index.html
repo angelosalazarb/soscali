@@ -706,6 +706,35 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
   </div>
 </div>
 
+<!-- ═══ Modal editar información ═══ -->
+<div class="modal-fondo" id="modal-editar" role="dialog" aria-modal="true" aria-labelledby="ed-titulo">
+  <div class="modal" style="max-height:88dvh;overflow-y:auto">
+    <h3 id="ed-titulo">Editar información</h3>
+    <p>Corrige un error o sube una foto mejor. Los cambios se ven de inmediato.</p>
+
+    <div id="ed-campo-nombre">
+      <label for="ed-nombre">Nombre</label>
+      <input type="text" id="ed-nombre" maxlength="120">
+    </div>
+
+    <label for="ed-direccion">Dirección o lugar</label>
+    <input type="text" id="ed-direccion" maxlength="200">
+
+    <label for="ed-descripcion">Descripción / información</label>
+    <textarea id="ed-descripcion" maxlength="1000"></textarea>
+
+    <label for="ed-foto">Cambiar foto</label>
+    <input type="file" id="ed-foto" accept="image/*">
+    <div id="ed-foto-prev"></div>
+
+    <p class="error-campo" id="err-ed"></p>
+    <div style="display:flex;gap:9px;margin-top:18px">
+      <button class="btn" id="ed-cancelar" style="flex:1">Cancelar</button>
+      <button class="btn primario" id="ed-guardar" style="flex:1">Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Modal "¡Ya apareció!" ═══ -->
 <div class="modal-fondo" id="modal-encontrado" role="dialog" aria-modal="true" aria-labelledby="me-titulo">
   <div class="modal">
@@ -883,15 +912,11 @@ function esHEIC(file){
   const t = (file.type || '').toLowerCase(), n = (file.name || '').toLowerCase();
   return t.includes('heic') || t.includes('heif') || n.endsWith('.heic') || n.endsWith('.heif');
 }
-// Decodifica el archivo a algo dibujable en canvas. createImageBitmap respeta
-// la orientación EXIF (fotos de celular salían acostadas) y en iOS Safari —de
-// donde vienen las fotos HEIC de iPhone— las decodifica de forma nativa.
-// Fallback a <img> para navegadores viejos.
+// Decodifica el archivo con <img> + object URL. En iOS Safari (de donde vienen
+// las fotos HEIC del iPhone) el <img> las decodifica de forma nativa, y respeta
+// la orientación EXIF. NO se usa createImageBitmap: su drawImage pinta la
+// imagen en NEGRO en iOS Safari (bug conocido de WebKit).
 async function decodificarImagen(file){
-  if (window.createImageBitmap) {
-    try { return await createImageBitmap(file, {imageOrientation: 'from-image'}); }
-    catch(e) { /* formato no soportado nativamente: seguir */ }
-  }
   return await imgDesdeBlob(file);
 }
 async function comprimirFoto(file){
@@ -1318,11 +1343,15 @@ const Detalle = (function(){
       html += `<div class="dato"><div class="clave">${r.tipo === 'dano' ? 'Actualizaciones de la zona' : 'Avistamientos'}</div>
         <div class="valor-d" id="avist-lista" data-reporte="${esc(r.id)}" data-dano="${r.tipo === 'dano' ? 1 : 0}"><span style="color:var(--muted)">Cargando…</span></div></div>`;
     }
+    // editar: corregir datos o resubir la foto
+    html += `<button class="btn bloque" style="margin-top:14px" id="btn-editar">
+      ${svgIcono('dano','currentColor',16)} Editar información / cambiar foto</button>`;
     $('#sheet-contenido').innerHTML = html;
     $('#sheet').classList.add('visible'); $('#sheet-fondo').classList.add('visible');
     $('#btn-tengo-info')?.addEventListener('click', () => Contacto.abrir(r.id));
     $('#btn-encontrado')?.addEventListener('click', () => Encontrado.abrir(r.id));
     $('#btn-avistamiento')?.addEventListener('click', () => Avistamiento.abrir(r.id, r.tipo));
+    $('#btn-editar')?.addEventListener('click', () => Editar.abrir(r));
     if ($('#avist-lista')) Avistamiento.cargar(r.id);
     $('#sheet-cerrar').focus();
   }
@@ -1421,6 +1450,56 @@ const Avistamiento = (function(){
     finally { $('#ma-enviar').disabled = false; }
   });
   return { abrir, cerrar, cargar };
+})();
+
+/* ═══ Editar: corregir datos o resubir la foto de un reporte ═══ */
+const Editar = (function(){
+  const CLAVE_NOMBRE = {desaparecido:'nombre', mascota:'nombre_mascota',
+                        hospital:'hospital', donacion:'nombre_punto'};
+  const fotoEd = montarFoto('#ed-foto', '#ed-foto-prev');
+  let rid = null, tipo = null;
+  function abrir(r){
+    rid = r.id; tipo = r.tipo;
+    const clave = CLAVE_NOMBRE[r.tipo];
+    // el campo "Nombre" solo aplica a tipos con nombre propio (no a daños)
+    $('#ed-campo-nombre').classList.toggle('oculto', !clave);
+    $('#ed-nombre').value = clave ? (r.extras[clave] || '') : '';
+    $('#ed-direccion').value = r.direccion || '';
+    $('#ed-descripcion').value = r.descripcion || '';
+    fotoEd.reset();
+    $('#err-ed').classList.remove('visible'); $('#err-ed').textContent = '';
+    $('#modal-editar').classList.add('visible');
+  }
+  function cerrar(){ $('#modal-editar').classList.remove('visible'); rid = null; }
+  $('#ed-cancelar').addEventListener('click', cerrar);
+  $('#modal-editar').addEventListener('click', e => { if (e.target === e.currentTarget) cerrar(); });
+  $('#ed-guardar').addEventListener('click', async () => {
+    if (!rid) return;
+    const cuerpo = {
+      direccion: $('#ed-direccion').value.trim(),
+      descripcion: $('#ed-descripcion').value.trim(),
+    };
+    if (!$('#ed-campo-nombre').classList.contains('oculto'))
+      cuerpo.nombre = $('#ed-nombre').value.trim();
+    const foto = fotoEd.valor();
+    if (foto) cuerpo.foto = foto;
+    $('#ed-guardar').disabled = true;
+    try {
+      const res = await fetch(`/api/reportes/${encodeURIComponent(rid)}/editar`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(cuerpo),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+      cerrar(); Detalle.cerrar();
+      toast('Información actualizada.', 'exito');
+      Mapa.recargar();
+    } catch(e) {
+      $('#err-ed').textContent = e.message === 'Failed to fetch' ? 'Sin conexión; intenta de nuevo.' : e.message;
+      $('#err-ed').classList.add('visible');
+    } finally { $('#ed-guardar').disabled = false; }
+  });
+  return { abrir, cerrar };
 })();
 
 /* ═══ Modal "¡Ya apareció!": cierra el ciclo con la buena noticia ═══ */

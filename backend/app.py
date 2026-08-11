@@ -256,12 +256,13 @@ _CSP = ("default-src 'self'; "
 
 @app.after_request
 def cabeceras_seguridad(resp):
-    resp.headers["Content-Security-Policy"] = _CSP
+    # Content-Security-Policy DESACTIVADA temporalmente: en la emergencia la
+    # prioridad es que la app funcione (la CSP estuvo interfiriendo con las
+    # fotos). Reactivar `_CSP` cuando la subida esté estable. Las otras
+    # cabeceras no bloquean nada, se mantienen.
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "no-referrer"
-    # el HTML no se cachea: tras un deploy el navegador toma la CSP y el JS
-    # nuevos sin necesidad de hard-reload (evita "desplegué pero sigue igual")
     if resp.mimetype == "text/html":
         resp.headers["Cache-Control"] = "no-cache"
     return resp
@@ -880,7 +881,10 @@ def foto_reporte(rid):
                          (rid,)).fetchone()
     if not f or not f["fotos"]:
         return jsonify({"error": "Sin foto"}), 404
-    return send_from_directory(FOTOS_DIR, f["fotos"])
+    resp = send_from_directory(FOTOS_DIR, f["fotos"])
+    # no-cache: al editar y resubir una foto, se ve la nueva de inmediato
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 # ─── Similares y confirmaciones (validación comunitaria) ─────────────────────
@@ -1044,6 +1048,49 @@ def marcar_encontrado(rid):
         if not f["resuelto"]:
             conn.execute("UPDATE reportes SET resuelto=1, resuelto_comentario=?,"
                          " resuelto_en=datetime('now') WHERE id=?", (comentario, rid))
+    return jsonify({"ok": True})
+
+
+@app.post("/api/reportes/<rid>/editar")
+def editar_reporte(rid):
+    """Edición pública: quien reportó (o quien nota un error) puede corregir
+    el nombre/dirección/descripción y RESUBIR la foto. En la emergencia prima
+    poder mantener la información al día; el panel admin sigue pudiendo ocultar
+    abusos. Solo campos de texto acotados + foto (todo saneado)."""
+    if not _rate_ok(f"edit:{_ip()}", maximo=20, ventana_seg=3600):
+        return jsonify({"error": "Demasiadas ediciones; intenta más tarde"}), 429
+    data = request.get_json(silent=True) or {}
+    with db() as conn:
+        f = conn.execute("SELECT * FROM reportes WHERE id=? AND estado='visible'",
+                         (rid,)).fetchone()
+        if not f:
+            return jsonify({"error": "Reporte no encontrado"}), 404
+
+        campos = {}
+        if "direccion" in data:
+            campos["direccion"] = _texto(data.get("direccion"), 200)
+        if "descripcion" in data:
+            campos["descripcion"] = _texto(data.get("descripcion"), 1000)
+        # nombre principal según el tipo (va en extras)
+        if "nombre" in data:
+            ex = json.loads(f["extras"] or "{}")
+            clave = {"desaparecido": "nombre", "mascota": "nombre_mascota",
+                     "hospital": "hospital", "donacion": "nombre_punto"}.get(f["tipo"])
+            if clave:
+                ex[clave] = _texto(data.get("nombre"), 120)
+                campos["extras"] = json.dumps(ex, ensure_ascii=False)
+        # foto nueva (reemplaza la anterior)
+        if data.get("foto"):
+            fila = {"id": rid, "tipo": f["tipo"], "fotos": f["fotos"]}
+            err = _guardar_foto(fila, data.get("foto"))
+            if err:
+                return jsonify({"error": err}), 400
+            campos["fotos"] = fila["fotos"]
+
+        if campos:
+            sets = ", ".join(f"{k}=?" for k in campos)
+            conn.execute(f"UPDATE reportes SET {sets} WHERE id=?",
+                         (*campos.values(), rid))
     return jsonify({"ok": True})
 
 

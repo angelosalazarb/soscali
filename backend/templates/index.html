@@ -328,8 +328,8 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
     <span><i class="punto" style="background:#271d67"></i> Desaparecido</span>
     <span><i class="punto" style="background:#00332a"></i> Punto de donación</span>
   </div>
-  <button class="chip" id="btn-alternar-lista" aria-pressed="false">Ver como lista</button>
-  <div id="lista-reportes" role="list"></div>
+  <button class="chip" id="btn-alternar-lista" aria-pressed="true">Ocultar lista</button>
+  <div id="lista-reportes" class="visible" role="list"></div>
 </section>
 
 <!-- ═══ VISTA: DAÑOS ═══ -->
@@ -1000,7 +1000,8 @@ const Mapa = (function(){
         ${r.resuelto ? '<p><span class="badge leve">Encontrado</span></p>'
           : (r.tipo === 'mascota' && r.extras.situacion === 'encontrada'
              ? '<p><span class="badge leve">Encontrada — buscan a sus dueños</span></p>' : '')}
-        ${necesita ? `<p style="color:var(--indigo);font-weight:600">${esc(necesita)}</p>` : ''}</div>`;
+        ${necesita ? `<p style="color:var(--indigo);font-weight:600">${esc(necesita)}</p>` : ''}
+        ${r.ultima_nota ? `<p style="color:var(--tinta)">${svgIcono(r.tipo === 'dano' ? 'dano' : r.tipo, 'var(--muted)', 13)} <em>“${esc(r.ultima_nota)}”</em> · <span style="color:var(--muted)">${esc(fechaCorta(r.ultima_nota_en))}</span></p>` : ''}</div>`;
       const abrir = () => Detalle.abrir(r);
       el.addEventListener('click', abrir);
       el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(); } });

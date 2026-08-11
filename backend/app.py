@@ -640,10 +640,19 @@ def listar_reportes():
     if request.args.get("hasta"):
         filtros.append("creado_en <= ?")
         params.append(request.args["hasta"] + " 23:59:59")
+    # última nota de la comunidad (avistamiento / actualización de zona) y su
+    # hora, para mostrarla en el resumen y ordenar por actividad reciente
+    sub_nota = ("(SELECT nota FROM avistamientos a WHERE a.reporte_id=reportes.id"
+                " ORDER BY a.creado_en DESC, a.id DESC LIMIT 1)")
+    sub_nota_en = "(SELECT MAX(creado_en) FROM avistamientos a WHERE a.reporte_id=reportes.id)"
     with db() as conn:
         filas = conn.execute(
-            f"SELECT {COLS_PUBLICAS} FROM reportes WHERE {' AND '.join(filtros)}"
-            " ORDER BY creado_en DESC LIMIT 2000", params).fetchall()
+            f"SELECT {COLS_PUBLICAS}, {sub_nota} AS ultima_nota,"
+            f" {sub_nota_en} AS ultima_nota_en"
+            f" FROM reportes WHERE {' AND '.join(filtros)}"
+            # ordena por la actividad más reciente: creación o última nota
+            f" ORDER BY MAX(creado_en, COALESCE({sub_nota_en}, creado_en)) DESC"
+            " LIMIT 2000", params).fetchall()
     return jsonify([_fila_publica(f) for f in filas])
 
 

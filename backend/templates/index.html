@@ -382,6 +382,7 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
     <span><i class="punto" style="background:#271d67"></i> Desaparecido</span>
     <span><i class="punto" style="background:#00332a"></i> Punto de acopio</span>
     <span><i class="punto" style="background:#075d4d"></i> Refugio</span>
+    <span><i class="punto" style="background:#8a5a32"></i> Ofrece donar</span>
   </div>
   <div class="fila-lista">
     <button class="chip" id="btn-alternar-lista" aria-pressed="true">Ocultar lista</button>
@@ -625,6 +626,7 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
     <div class="chips" id="don-subtipo" role="group" aria-label="Tipo de ayuda">
       <button type="button" class="chip" data-valor="acopio" aria-pressed="true">Punto de acopio / donaciones</button>
       <button type="button" class="chip" data-valor="refugio" aria-pressed="false">Refugio</button>
+      <button type="button" class="chip" data-valor="oferta" aria-pressed="false">Tengo disponible para donar</button>
     </div>
 
     <div class="paso" data-stepper="donacion"></div>
@@ -678,14 +680,32 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
       <p class="ayuda">Si lo pones, se mostrará en el detalle para que la gente pueda llamar directo.</p>
     </div>
 
+    <!-- ─── Campos de OFERTA: "tengo disponible para donar" ─── -->
+    <div id="don-campos-oferta" class="oculto">
+      <label for="of-items">¿Qué tienes disponible? <span class="req" aria-hidden="true">*</span></label>
+      <input type="text" id="of-items" maxlength="300" placeholder="Ej.: guantes, cascos, medicamentos, maquinaria, palas…">
+      <p class="ayuda">Separa cada cosa con una coma.</p>
+      <p class="error-campo" id="err-of-items">Cuéntanos qué tienes disponible para donar.</p>
+
+      <label for="of-nombre">Tu nombre o referencia (opcional)</label>
+      <input type="text" id="of-nombre" maxlength="120" placeholder="Ej.: Ferretería La 14, familia Gómez…">
+
+      <label for="of-tel">Teléfono de contacto (público) <span class="req" aria-hidden="true">*</span></label>
+      <input type="tel" id="of-tel" maxlength="30" inputmode="tel" placeholder="Ej.: 300 123 4567">
+      <p class="ayuda">Se mostrará públicamente para coordinar el punto de entrega. Cuando entregues todo, podrás retirar la publicación desde el mismo reporte.</p>
+      <p class="error-campo" id="err-of-tel">El teléfono es obligatorio para poder coordinar la entrega.</p>
+    </div>
+
     <label for="don-horario">Horario</label>
     <input type="text" id="don-horario" maxlength="120" placeholder="Ej.: 24 horas · o todos los días 8 a.m. – 6 p.m.">
 
-    <label for="don-ayudando">¿Cuántas personas están ayudando en el punto ahora?</label>
-    <input type="number" id="don-ayudando" min="0" max="9999" inputmode="numeric" value="0">
-    <label for="don-faltan">¿Cuántas manos faltan?</label>
-    <input type="number" id="don-faltan" min="0" max="9999" inputmode="numeric" value="0">
-    <p class="ayuda">Estos contadores se pueden ajustar después desde el detalle del punto, según cambie la situación.</p>
+    <div id="don-gente-campos">
+      <label for="don-ayudando">¿Cuántas personas están ayudando en el punto ahora?</label>
+      <input type="number" id="don-ayudando" min="0" max="9999" inputmode="numeric" value="0">
+      <label for="don-faltan">¿Cuántas manos faltan?</label>
+      <input type="number" id="don-faltan" min="0" max="9999" inputmode="numeric" value="0">
+      <p class="ayuda">Estos contadores se pueden ajustar después desde el detalle del punto, según cambie la situación.</p>
+    </div>
 
     <label for="don-desc">Información adicional</label>
     <textarea id="don-desc" maxlength="1000" placeholder="Persona de contacto, indicaciones para llegar…"></textarea>
@@ -857,8 +877,9 @@ const TIPO_META = {
 const ESTADO_SALUD = {consciente:'Consciente', inconsciente:'Inconsciente', estable:'Estable', delicado:'Delicado', uci:'En UCI'};
 const SERVICIO_NOMBRE = {agua:'Agua', comida:'Comida', dormida:'Dónde dormir', banos:'Baños/duchas', medica:'Atención médica', electricidad:'Electricidad'};
 const esRefugio = r => r.tipo === 'donacion' && r.extras && r.extras.subtipo === 'refugio';
+const esOferta  = r => r.tipo === 'donacion' && r.extras && r.extras.subtipo === 'oferta';
 const claveIcono = r => esRefugio(r) ? 'refugio' : r.tipo;
-const nombreTipo = r => esRefugio(r) ? 'Refugio' : TIPO_META[r.tipo].nombre;
+const nombreTipo = r => esRefugio(r) ? 'Refugio' : esOferta(r) ? 'Donación disponible' : TIPO_META[r.tipo].nombre;
 const SEV_COLOR = {leve:'#075d4d', moderado:'#bc6e56', grave:'#692a27', colapso:'#692a27'};
 const SEV_NOMBRE = {leve:'Leve', moderado:'Moderado', grave:'Grave', colapso:'Colapso'};
 const NEC_NOMBRE = {agua:'Agua', alimentos:'Alimentos', medicamentos:'Medicamentos', ropa:'Ropa', cobijas:'Cobijas', aseo:'Kit de aseo', otros:'Otros'};
@@ -878,6 +899,7 @@ function svgIcono(tipo, color, tam=18){
 function colorReporte(r){
   if (r.resuelto === 2) return '#5d5665'; // fallecido: gris sobrio
   if (r.resuelto) return '#075d4d';   // encontrado/reunido: verde esperanza
+  if (esOferta(r)) return '#8a5a32';    // oferta de donación: marrón cálido
   if (esRefugio(r)) return '#075d4d';   // refugio: verde, distinto del acopio
   return r.tipo === 'dano' ? (SEV_COLOR[r.extras.severidad] || '#bc6e56') : TIPO_META[r.tipo].color;
 }
@@ -1013,7 +1035,7 @@ function tituloReporte(r){
   return r.tipo === 'mascota' ? `${r.extras.nombre_mascota || 'Mascota'} — ${r.extras.especie || 'perdida'}`
        : r.tipo === 'desaparecido' ? (r.extras.nombre || 'Persona desaparecida')
        : r.tipo === 'hospital' ? `Paciente sin identificar — ${r.extras.hospital || 'hospital'}`
-       : r.tipo === 'donacion' ? (r.extras.nombre_punto || (esRefugio(r) ? 'Refugio' : 'Punto de acopio'))
+       : r.tipo === 'donacion' ? (r.extras.nombre_punto || (esRefugio(r) ? 'Refugio' : esOferta(r) ? 'Donación disponible' : 'Punto de acopio'))
        : `Daño ${SEV_NOMBRE[r.extras.severidad] || ''}`.trim();
 }
 
@@ -1250,8 +1272,10 @@ const Mapa = (function(){
       const dirSub = esDano ? '' : (r.direccion ? ' · ' + esc(r.direccion) : '');
       // qué se necesita, visible desde la lista sin abrir el detalle
       let necesita = '';
-      if (r.tipo === 'donacion' && !esRefugio(r) && (r.extras.necesidades || []).length)
+      if (r.tipo === 'donacion' && !esRefugio(r) && !esOferta(r) && (r.extras.necesidades || []).length)
         necesita = 'Se necesita: ' + r.extras.necesidades.map(n => NEC_NOMBRE[n] || n).join(', ');
+      if (esOferta(r))
+        necesita = 'Ofrece: ' + ((r.extras.ofrece || []).join(', ') || 'ver detalle');
       if (esRefugio(r)) {
         const s = (r.extras.servicios || []).map(x => SERVICIO_NOMBRE[x] || x);
         necesita = 'Refugio' + (r.extras.capacidad != null ? ` · ${r.extras.capacidad} cupos` : '')
@@ -1266,7 +1290,7 @@ const Mapa = (function(){
           : `<span class="icono">${svgIcono(r.tipo, colorReporte(r), 22)}</span>`}
         <div><h3>${esc(titulo)}${badgeSev}</h3>
         <p>${esc(r.ciudad)}, ${esc(r.departamento)}${dirSub} · ${esc(fechaCorta(r.creado_en))}${(r.confirmaciones || 1) > 1 ? ` · <strong style="color:var(--esmeralda)">${r.confirmaciones} reportes</strong>` : ''}</p>
-        ${r.resuelto ? `<p><span class="badge ${r.resuelto === 2 ? 'luto">Fallecido' : 'leve">Encontrado'}</span></p>`
+        ${r.resuelto ? `<p><span class="badge ${r.resuelto === 2 ? 'luto">Fallecido' : esOferta(r) ? 'leve">Entregada' : 'leve">Encontrado'}</span></p>`
           : (r.tipo === 'mascota' && r.extras.situacion === 'encontrada'
              ? '<p><span class="badge leve">Encontrada — buscan a sus dueños</span></p>' : '')}
         ${coordBadges(r) || esApagado(r) ? `<p>${coordBadges(r)}${esApagado(r)
@@ -1290,6 +1314,7 @@ const Mapa = (function(){
         <div class="metrica"><span class="valor">${m.por_tipo.hospital || 0}</span><span class="nombre">${svgIcono('hospital','#271d67',14)} Sin identificar (hospitales)</span></div>
         <div class="metrica"><span class="valor">${m.acopios || 0}</span><span class="nombre">${svgIcono('donacion','#00332a',14)} Puntos de acopio</span></div>
         <div class="metrica"><span class="valor">${m.refugios || 0}</span><span class="nombre">${svgIcono('refugio','#075d4d',14)} Refugios</span></div>
+        <div class="metrica"><span class="valor">${m.ofertas || 0}</span><span class="nombre">${svgIcono('donacion','#8a5a32',14)} Ofrecen donar</span></div>
         <div class="metrica"><span class="valor">${m.por_tipo.mascota || 0}</span><span class="nombre">${svgIcono('mascota','#3d2e8a',14)} Mascotas perdidas</span></div>
         <div class="metrica"><span class="valor">${m.total}</span><span class="nombre">Reportes totales</span></div>
         <div class="metrica"><span class="valor" style="color:var(--esmeralda)">${m.encontrados || 0}</span><span class="nombre">Encontrados</span></div>`;
@@ -1350,7 +1375,7 @@ function esApagado(r){
 }
 function coordBadges(r){
   // aviso de coordinación: reparte a los voluntarios entre puntos
-  if (!['dano','donacion'].includes(r.tipo) || r.resuelto) return '';
+  if (!['dano','donacion'].includes(r.tipo) || r.resuelto || esOferta(r)) return '';
   if ((r.faltan || 0) > 0) return `<span class="badge acudir">Faltan ${r.faltan}</span>`;
   if ((r.ayudando || 0) > 0) return `<span class="badge cubierto">No acudir · ya hay ${r.ayudando}</span>`;
   return '';
@@ -1373,11 +1398,17 @@ async function textoCompartir(r, url){
       const serv = (r.extras.servicios || []).map(s => SERVICIO_NOMBRE[s] || s).join(', ');
       L.push(`Refugio${r.extras.capacidad != null ? ` · ${r.extras.capacidad} cupos` : ''}${serv ? ' · ' + serv : ''}`);
     }
-    const nec = (r.extras.necesidades || []).map(n => NEC_NOMBRE[n] || n).join(', ');
-    if (nec) L.push(`Se necesita: ${nec}`);
+    if (esOferta(r)) {
+      const items = (r.extras.ofrece || []).join(', ');
+      if (items) L.push(`Tiene disponible: ${items}`);
+      if (r.extras.telefono) L.push(`📞 Coordinar entrega: ${r.extras.telefono}`);
+    } else {
+      const nec = (r.extras.necesidades || []).map(n => NEC_NOMBRE[n] || n).join(', ');
+      if (nec) L.push(`Se necesita: ${nec}`);
+    }
     if (r.extras.horario) L.push(`Horario: ${r.extras.horario}`);
   }
-  if (['dano','donacion'].includes(r.tipo) && !r.resuelto) {
+  if (['dano','donacion'].includes(r.tipo) && !r.resuelto && !esOferta(r)) {
     L.push(`👥 ${r.ayudando || 0} ayudando ahora · faltan ${r.faltan || 0} manos`);
     const act = ultimaActividad(r);
     if (act) L.push(`${esApagado(r) ? '⚠️ Sin confirmar' : 'Actualizado'} ${haceTexto(act)}`);
@@ -1457,7 +1488,7 @@ const Detalle = (function(){
         esc(r.tipo === 'desaparecido' ? (r.extras.nombre || '—')
           : r.tipo === 'hospital' ? (r.extras.hospital || 'Hospital')
           : r.tipo === 'mascota' ? (r.extras.nombre_mascota || 'Mascota perdida')
-          : r.tipo === 'donacion' ? (r.extras.nombre_punto || (esRefugio(r) ? 'Refugio' : 'Punto de acopio'))
+          : r.tipo === 'donacion' ? (r.extras.nombre_punto || (esRefugio(r) ? 'Refugio' : esOferta(r) ? 'Donación disponible' : 'Punto de acopio'))
           : (r.ciudad + ' — daño ' + (SEV_NOMBRE[r.extras.severidad]||'').toLowerCase()))}</h3></div></div>`;
     if (r.fotos) {
       const altFoto = {dano:'Foto del daño', donacion:'Foto o flyer del punto de donación',
@@ -1466,8 +1497,10 @@ const Detalle = (function(){
       html += `<img src="/api/reportes/${encodeURIComponent(r.id)}/foto" alt="${altFoto}"
         style="width:100%;max-height:320px;object-fit:contain;background:var(--faint);border-radius:14px;border:1px solid var(--border);margin-top:12px" loading="lazy">`;
     }
-    // los puntos activos (daños y ayudas) tienen coordinación y necesidades editables
-    const enPunto = ['dano','donacion'].includes(r.tipo) && !r.resuelto;
+    // los puntos activos (daños y ayudas) tienen coordinación y necesidades
+    // editables; las OFERTAS de donación no (solo vigencia, bitácora y entrega)
+    const oferta = esOferta(r);
+    const enPunto = ['dano','donacion'].includes(r.tipo) && !r.resuelto && !oferta;
     if (r.tipo === 'dano') {
       html += `<div style="margin-top:10px"><span class="badge ${r.extras.severidad}">${svgIcono('dano','currentColor',13)} Severidad: ${SEV_NOMBRE[r.extras.severidad]}</span>
         ${r.extras.personas_atrapadas ? ' <span class="badge alerta">Posibles personas atrapadas — 123</span>' : ''}</div>`;
@@ -1500,7 +1533,26 @@ const Detalle = (function(){
             + fila('Ropa y pertenencias', r.extras.ropa)
             + fila('Ingresó', r.extras.fecha_ingreso);
     }
-    if (r.tipo === 'donacion' && !esRefugio(r)) {
+    if (oferta) {
+      const items = (r.extras.ofrece || []).map(x => `<span class="badge tipo-donacion">${esc(x)}</span>`).join(' ');
+      html += (r.resuelto ? '<div style="margin-top:10px"><span class="badge leve">Entregada — ya no disponible</span></div>' : '')
+            + `<div class="dato"><div class="clave">Tiene disponible</div><div class="valor-d">${items || '—'}</div></div>`
+            + fila('Horario', r.extras.horario);
+      if (r.resuelto) {
+        html += `<button class="btn primario bloque" style="margin-top:12px" id="btn-reabrir">
+          Tengo disponible de nuevo — reabrir publicación</button>`;
+      }
+      if (r.extras.telefono && !r.resuelto) {
+        const tel = r.extras.telefono;
+        html += `<a class="btn primario bloque" style="margin-top:12px" href="tel:${esc(tel.replace(/[^+\d]/g,''))}">
+          ${svgIcono('donacion','currentColor',18)} Coordinar entrega · ${esc(tel)}</a>`;
+      }
+      if (!r.resuelto) {
+        const act = ultimaActividad(r), apagado = esApagado(r);
+        html += `<p style="margin-top:8px;color:${apagado ? 'var(--error)' : 'var(--muted)'};font-size:13px">${
+          act ? (apagado ? 'Sin confirmar ' : 'Actualizado ') + haceTexto(act) : ''}</p>`;
+      }
+    } else if (r.tipo === 'donacion' && !esRefugio(r)) {
       if (!enPunto) {
         const nec = (r.extras.necesidades || []).map(n => `<span class="badge tipo-donacion">${NEC_NOMBRE[n] || esc(n)}</span>`).join(' ');
         html += `<div class="dato"><div class="clave">Se necesita</div><div class="valor-d">${nec || '—'}</div></div>`;
@@ -1586,6 +1638,14 @@ const Detalle = (function(){
         ${svgIcono(r.tipo === 'dano' ? 'dano' : 'donacion','currentColor',18)} ${
           r.tipo === 'dano' ? 'Agregar actualización de la zona' : 'Agregar actualización del punto'}</button>`;
     }
+    if (oferta && !r.resuelto) {
+      html += `<button class="btn primario bloque" style="margin-top:14px" id="btn-vigente">
+        ✓ Sigue disponible</button>`;
+      html += `<button class="btn bloque" style="margin-top:9px" id="btn-entregado">
+        Ya se entregó todo — retirar publicación</button>`;
+      html += `<button class="btn bloque" style="margin-top:9px" id="btn-avistamiento">
+        ${svgIcono('donacion','currentColor',18)} Agregar actualización</button>`;
+    }
     if (['mascota','desaparecido','dano','donacion'].includes(r.tipo)) {
       html += `<div class="dato"><div class="clave">${
           r.tipo === 'dano' ? 'Actualizaciones de la zona'
@@ -1603,6 +1663,19 @@ const Detalle = (function(){
     $('#btn-tengo-info')?.addEventListener('click', () => Contacto.abrir(r.id));
     $('#btn-encontrado')?.addEventListener('click', () => Encontrado.abrir(r.id));
     $('#btn-fallecido')?.addEventListener('click', () => Encontrado.abrir(r.id, 'fallecido'));
+    $('#btn-entregado')?.addEventListener('click', () => Encontrado.abrir(r.id, 'entregado'));
+    $('#btn-reabrir')?.addEventListener('click', async () => {
+      const b = $('#btn-reabrir'); b.disabled = true;
+      try {
+        const res = await fetch(`/api/reportes/${encodeURIComponent(r.id)}/reabrir`, {method: 'POST'});
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+        toast('La publicación volvió al mapa. ¡Gracias por seguir donando!', 'exito');
+        Mapa.recargar();
+        abrirReporte(r.id);   // re-abre el detalle ya con la oferta activa
+      } catch(e) { toast(e.message === 'Failed to fetch' ? 'Sin conexión; intenta de nuevo.' : e.message, 'error'); }
+      finally { b.disabled = false; }
+    });
     $('#btn-avistamiento')?.addEventListener('click', () => Avistamiento.abrir(r.id, r.tipo));
     $('#btn-editar')?.addEventListener('click', () => Editar.abrir(r));
     $('#btn-vigente')?.addEventListener('click', async () => {
@@ -1863,16 +1936,21 @@ const Encontrado = (function(){
   let rid = null, modo = 'encontrado';
   function abrir(id, m){
     rid = id; modo = m || 'encontrado';
-    const luto = modo === 'fallecido';
-    $('#me-titulo').textContent = luto ? 'Lamentamos mucho esta noticia' : '¡Qué buena noticia!';
+    const luto = modo === 'fallecido', entrega = modo === 'entregado';
+    $('#me-titulo').textContent = luto ? 'Lamentamos mucho esta noticia'
+                                : entrega ? '¡Gracias por donar!' : '¡Qué buena noticia!';
     $('#me-desc').innerHTML = luto
       ? 'Cuéntanos brevemente cómo se confirmó. El reporte quedará marcado como <strong>fallecido</strong> para informar con respeto a quienes lo buscaban.'
+      : entrega
+      ? 'Cuéntanos brevemente cómo se entregó. La publicación quedará marcada como <strong>entregada</strong> y se retirará del mapa.'
       : 'Cuéntanos brevemente cómo o dónde apareció. El reporte quedará marcado como <strong>encontrado</strong> para avisar a todos los que lo buscaban.';
-    $('#me-label').innerHTML = (luto ? '¿Cómo se confirmó?' : '¿Cómo apareció?') + ' <span class="req" aria-hidden="true">*</span>';
+    $('#me-label').innerHTML = (luto ? '¿Cómo se confirmó?' : entrega ? '¿Cómo se entregó?' : '¿Cómo apareció?') + ' <span class="req" aria-hidden="true">*</span>';
     $('#me-comentario').placeholder = luto
       ? 'Ej.: su familia confirmó el fallecimiento; fue identificado en Medicina Legal'
+      : entrega
+      ? 'Ej.: entregué todo en el acopio del coliseo; ya no tengo más disponible'
       : 'Ej.: apareció en casa de un vecino, está bien y ya está con su familia';
-    $('#me-marcar').textContent = luto ? 'Actualizar reporte' : 'Marcar encontrado';
+    $('#me-marcar').textContent = luto ? 'Actualizar reporte' : entrega ? 'Retirar publicación' : 'Marcar encontrado';
     $('#me-comentario').value = '';
     $('#err-me').classList.remove('visible');
     $('#modal-encontrado').classList.add('visible');
@@ -1896,7 +1974,8 @@ const Encontrado = (function(){
       if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
       cerrar(); Detalle.cerrar();
       toast(modo === 'fallecido' ? 'El reporte quedó actualizado. Lamentamos mucho la pérdida.'
-                                 : '¡Qué buena noticia! Quedó marcado como encontrado.',
+          : modo === 'entregado' ? 'Publicación retirada. ¡Gracias por tu donación!'
+          : '¡Qué buena noticia! Quedó marcado como encontrado.',
             modo === 'fallecido' ? '' : 'exito');
       Mapa.recargar();
     } catch(e) { toast(e.message === 'Failed to fetch' ? 'Sin conexión; intenta de nuevo.' : e.message, 'error'); }
@@ -2336,17 +2415,33 @@ const leerServicios = chipsMulti('#ref-servicios');
 const leerAdmiteMascotas = chipUnico('#ref-mascotas');
 // el selector acopio/refugio muestra u oculta cada bloque de campos
 $('#don-subtipo').addEventListener('click', () => {
-  const esRefugio = leerSubtipo() === 'refugio';
-  $('#don-campos-acopio').classList.toggle('oculto', esRefugio);
-  $('#don-campos-refugio').classList.toggle('oculto', !esRefugio);
-  $('#don-submit').textContent = esRefugio ? 'Registrar refugio' : 'Registrar punto de acopio';
+  const st = leerSubtipo() || 'acopio';
+  $('#don-campos-acopio').classList.toggle('oculto', st !== 'acopio');
+  $('#don-campos-refugio').classList.toggle('oculto', st !== 'refugio');
+  $('#don-campos-oferta').classList.toggle('oculto', st !== 'oferta');
+  // los contadores de voluntarios no aplican a una oferta de donación
+  $('#don-gente-campos').classList.toggle('oculto', st === 'oferta');
+  $('#don-submit').textContent = st === 'refugio' ? 'Registrar refugio'
+                               : st === 'oferta' ? 'Publicar donación disponible'
+                               : 'Registrar punto de acopio';
 });
 $('#form-donacion').addEventListener('submit', async e => {
   e.preventDefault();
   const ubic = Stepper.leer('donacion'); if (!ubic) return;
   const subtipo = leerSubtipo() || 'acopio';
   let extras;
-  if (subtipo === 'refugio') {
+  if (subtipo === 'oferta') {
+    const items = $('#of-items').value.split(',').map(s => s.trim()).filter(Boolean);
+    if (!items.length) { $('#err-of-items').classList.add('visible'); $('#of-items').focus(); return; }
+    $('#err-of-items').classList.remove('visible');
+    const tel = $('#of-tel').value.trim();
+    if (tel.replace(/\D/g, '').length < 7) { $('#err-of-tel').classList.add('visible'); $('#of-tel').focus(); return; }
+    $('#err-of-tel').classList.remove('visible');
+    extras = { subtipo: 'oferta', ofrece: items.slice(0, 8),
+               nombre_punto: $('#of-nombre').value.trim(),
+               telefono: tel,
+               horario: $('#don-horario').value.trim() };
+  } else if (subtipo === 'refugio') {
     const nombre = $('#ref-nombre').value.trim();
     if (!nombre) { $('#err-ref-nombre').classList.add('visible'); $('#ref-nombre').focus(); return; }
     $('#err-ref-nombre').classList.remove('visible');
@@ -2368,8 +2463,8 @@ $('#form-donacion').addEventListener('submit', async e => {
   }
   const payload = {
     id: crypto.randomUUID(), tipo: 'donacion', ...ubic,
-    ayudando: Math.max(0, parseInt($('#don-ayudando').value, 10) || 0),
-    faltan: Math.max(0, parseInt($('#don-faltan').value, 10) || 0),
+    ayudando: subtipo === 'oferta' ? 0 : Math.max(0, parseInt($('#don-ayudando').value, 10) || 0),
+    faltan: subtipo === 'oferta' ? 0 : Math.max(0, parseInt($('#don-faltan').value, 10) || 0),
     descripcion: $('#don-desc').value.trim(),
     foto: fotoDon.valor(),
     extras,
@@ -2388,7 +2483,9 @@ $('#form-donacion').addEventListener('submit', async e => {
   Stepper.reset('donacion'); fotoDon.reset();
   pantallaExito('#exito-donacion', '#form-donacion',
     estado === 'enviado'
-      ? (subtipo === 'refugio' ? 'Refugio registrado' : 'Punto de acopio registrado')
+      ? (subtipo === 'refugio' ? 'Refugio registrado'
+         : subtipo === 'oferta' ? 'Donación publicada — te contactarán para coordinar la entrega'
+         : 'Punto de acopio registrado')
       : 'Registro en cola de envío');
 });
 

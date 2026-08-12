@@ -505,9 +505,26 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
     elif tipo == "donacion":
         # subtipo dentro de extras: los reportes viejos sin él son 'acopio'
         subtipo = (extras_in.get("subtipo")
-                   if extras_in.get("subtipo") in ("acopio", "refugio") else "acopio")
+                   if extras_in.get("subtipo") in ("acopio", "refugio", "oferta") else "acopio")
         extras["subtipo"] = subtipo
-        if subtipo == "refugio":
+        if subtipo == "oferta":
+            # "tengo disponible para donar": insumos/equipos ofrecidos en texto
+            # libre + teléfono público OBLIGATORIO para coordinar la entrega
+            if not isinstance(extras_in.get("ofrece"), list):
+                return None, "ofrece debe ser una lista"
+            ofrece = _lista_abierta(extras_in["ofrece"], ())
+            if not ofrece:
+                return None, "Cuéntanos qué tienes disponible para donar"
+            extras["ofrece"] = ofrece
+            tel = _texto(extras_in.get("telefono"), 30)
+            if len("".join(c for c in tel if c.isdigit())) < 7:
+                return None, "El teléfono de contacto es obligatorio para coordinar la entrega"
+            extras["telefono"] = tel
+            if extras_in.get("nombre_punto"):
+                extras["nombre_punto"] = _texto(extras_in["nombre_punto"], 120)
+            if extras_in.get("horario"):
+                extras["horario"] = _texto(extras_in["horario"], 120)
+        elif subtipo == "refugio":
             nombre = _texto(extras_in.get("nombre_punto"), 120)
             if not nombre:
                 return None, "El nombre o referencia del refugio es obligatorio"
@@ -706,14 +723,21 @@ def listar_reportes():
     if request.args.get("resuelto") in ("0", "1", "2"):
         filtros.append("resuelto=?")
         params.append(int(request.args["resuelto"]))
+    else:
+        # las ofertas de donación ya entregadas se retiran del mapa por defecto
+        # (soft: siguen en la BD y aparecen con ?resuelto=1 o en el panel admin)
+        filtros.append("NOT (COALESCE(json_extract(extras,'$.subtipo'),'')='oferta'"
+                       " AND resuelto=1)")
     if request.args.get("falta_gente") == "1":
         filtros.append("faltan > 0")
     # subtipo de ayuda (acopio | refugio) vía json_extract, parametrizado
-    if request.args.get("subtipo") in ("acopio", "refugio"):
-        if request.args["subtipo"] == "refugio":
-            filtros.append("json_extract(extras,'$.subtipo')='refugio'")
+    if request.args.get("subtipo") in ("acopio", "refugio", "oferta"):
+        if request.args["subtipo"] == "acopio":
+            filtros.append("COALESCE(json_extract(extras,'$.subtipo'),'acopio')"
+                           " NOT IN ('refugio','oferta')")
         else:
-            filtros.append("COALESCE(json_extract(extras,'$.subtipo'),'acopio')!='refugio'")
+            filtros.append("json_extract(extras,'$.subtipo')=?")
+            params.append(request.args["subtipo"])
     if request.args.get("desde"):
         filtros.append("creado_en >= ?")
         params.append(request.args["desde"])
@@ -1143,6 +1167,9 @@ def actualizar_necesidades(rid):
         if not f or f["tipo"] not in ("dano", "donacion"):
             return jsonify({"error": "Reporte no encontrado"}), 404
         extras = json.loads(f["extras"] or "{}")
+        if extras.get("subtipo") == "oferta":
+            # lo que una oferta tiene disponible lo edita su dueño vía /editar
+            return jsonify({"error": "Reporte no encontrado"}), 404
         lista = list(extras.get("necesidades") or [])
         cambiado = False
         if accion == "agregar":
@@ -1187,9 +1214,12 @@ def actualizar_gente(rid):
             or not isinstance(valor, int) or not 0 <= valor <= 9999):
         return jsonify({"error": "Cambio no válido"}), 400
     with db() as conn:
-        f = conn.execute("SELECT tipo, ayudando, faltan FROM reportes"
+        f = conn.execute("SELECT tipo, ayudando, faltan, extras FROM reportes"
                          " WHERE id=? AND estado='visible'", (rid,)).fetchone()
         if not f or f["tipo"] not in ("dano", "donacion"):
+            return jsonify({"error": "Reporte no encontrado"}), 404
+        if json.loads(f["extras"] or "{}").get("subtipo") == "oferta":
+            # una oferta de donación no coordina voluntarios
             return jsonify({"error": "Reporte no encontrado"}), 404
         if valor != (f[campo] or 0):
             if campo == "ayudando":
@@ -1235,13 +1265,39 @@ def marcar_vigente(rid):
     return jsonify({"ok": True, "vigente_en": vigente})
 
 
+@app.post("/api/reportes/<rid>/reabrir")
+def reabrir_oferta(rid):
+    """Una oferta de donación entregada puede volver: si quien la publicó
+    consigue más insumos, cualquiera la reabre y regresa al mapa con su
+    vigencia renovada. Solo aplica a ofertas; queda en la bitácora."""
+    if not _rate_ok(f"reab:{_ip()}", maximo=5, ventana_seg=3600):
+        return jsonify({"error": "Demasiados cambios; intenta más tarde"}), 429
+    with db() as conn:
+        f = conn.execute("SELECT tipo, resuelto, extras FROM reportes"
+                         " WHERE id=? AND estado='visible'", (rid,)).fetchone()
+        if (not f or f["tipo"] != "donacion"
+                or json.loads(f["extras"] or "{}").get("subtipo") != "oferta"):
+            return jsonify({"error": "Reporte no encontrado"}), 404
+        if f["resuelto"]:
+            conn.execute("UPDATE reportes SET resuelto=0, resuelto_comentario=NULL,"
+                         " resuelto_en=NULL, vigente_en=datetime('now') WHERE id=?", (rid,))
+            conn.execute("INSERT INTO avistamientos (reporte_id, nota, evento, ip, user_agent)"
+                         " VALUES (?,?,'vigente',?,?)",
+                         (rid, "La donación está disponible de nuevo.",
+                          _ip(), _texto(request.headers.get("User-Agent"), 300)))
+        vigente = conn.execute("SELECT vigente_en FROM reportes WHERE id=?",
+                               (rid,)).fetchone()[0]
+    return jsonify({"ok": True, "vigente_en": vigente})
+
+
 @app.post("/api/reportes/<rid>/encontrado")
 def marcar_encontrado(rid):
     """Cierra el ciclo con la buena noticia: marca un desaparecido, paciente
     o mascota como encontrado/reunido; con desenlace='fallecido' (solo
-    personas) el cierre es el triste. El reporte NO se borra: queda visible
-    con la insignia y el comentario, que es información para todos los que lo
-    buscaban. Auditado y reversible desde el panel admin."""
+    personas) el cierre es el triste. En las OFERTAS de donación marca que ya
+    se entregó todo (y el listado las retira del mapa). El reporte NO se
+    borra: queda con la insignia y el comentario. Auditado y reversible desde
+    el panel admin."""
     if not _rate_ok(f"enc:{_ip()}", maximo=5, ventana_seg=3600):
         return jsonify({"error": "Demasiadas marcas; intenta más tarde"}), 429
     data = request.get_json(silent=True) or {}
@@ -1250,9 +1306,13 @@ def marcar_encontrado(rid):
     if len(comentario) < 5:
         return jsonify({"error": "Cuéntanos brevemente cómo o dónde apareció"}), 400
     with db() as conn:
-        f = conn.execute("SELECT tipo, resuelto FROM reportes WHERE id=? AND estado='visible'",
-                         (rid,)).fetchone()
-        if not f or f["tipo"] not in ("desaparecido", "hospital", "mascota"):
+        f = conn.execute("SELECT tipo, resuelto, extras FROM reportes"
+                         " WHERE id=? AND estado='visible'", (rid,)).fetchone()
+        if not f or f["tipo"] not in ("desaparecido", "hospital", "mascota", "donacion"):
+            return jsonify({"error": "Reporte no encontrado"}), 404
+        if (f["tipo"] == "donacion"
+                and json.loads(f["extras"] or "{}").get("subtipo") != "oferta"):
+            # acopios y refugios no se "resuelven"; solo las ofertas se entregan
             return jsonify({"error": "Reporte no encontrado"}), 404
         if fallecido and f["tipo"] not in ("desaparecido", "hospital"):
             return jsonify({"error": "Reporte no encontrado"}), 404
@@ -1319,13 +1379,16 @@ def metricas():
         for f in conn.execute("SELECT tipo, COUNT(*) n FROM reportes"
                               " WHERE estado='visible' AND resuelto=0 GROUP BY tipo"):
             por_tipo[f["tipo"]] = f["n"]
-        encontrados = conn.execute("SELECT COUNT(*) FROM reportes"
-                                   " WHERE estado='visible' AND resuelto=1").fetchone()[0]
+        encontrados = conn.execute(
+            "SELECT COUNT(*) FROM reportes WHERE estado='visible' AND resuelto=1"
+            " AND COALESCE(json_extract(extras,'$.subtipo'),'')!='oferta'").fetchone()[0]
         # ayudas divididas por subtipo (json_extract, sin columna nueva)
         ayuda = conn.execute(
             "SELECT"
             " SUM(CASE WHEN json_extract(extras,'$.subtipo')='refugio' THEN 1 ELSE 0 END) refugios,"
-            " SUM(CASE WHEN COALESCE(json_extract(extras,'$.subtipo'),'acopio')!='refugio' THEN 1 ELSE 0 END) acopios"
+            " SUM(CASE WHEN json_extract(extras,'$.subtipo')='oferta' THEN 1 ELSE 0 END) ofertas,"
+            " SUM(CASE WHEN COALESCE(json_extract(extras,'$.subtipo'),'acopio')"
+            "          NOT IN ('refugio','oferta') THEN 1 ELSE 0 END) acopios"
             " FROM reportes WHERE estado='visible' AND resuelto=0 AND tipo='donacion'").fetchone()
         por_ciudad = [dict(f) for f in conn.execute(
             "SELECT departamento, ciudad, COUNT(*) n FROM reportes"
@@ -1337,7 +1400,8 @@ def metricas():
     return jsonify({"por_tipo": por_tipo, "por_ciudad": por_ciudad,
                     "total": total, "faltan_gente": faltan_gente,
                     "encontrados": encontrados,
-                    "acopios": ayuda["acopios"] or 0, "refugios": ayuda["refugios"] or 0})
+                    "acopios": ayuda["acopios"] or 0, "refugios": ayuda["refugios"] or 0,
+                    "ofertas": ayuda["ofertas"] or 0})
 
 
 @app.get("/static/<path:fname>")

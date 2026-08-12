@@ -90,6 +90,9 @@ CREATE TABLE IF NOT EXISTS reportes (
   resuelto           INTEGER DEFAULT 0,         -- 1 = encontrado/reunido (desaparecidos, pacientes, mascotas) · 2 = fallecido (solo personas)
   resuelto_comentario TEXT,                     -- cómo/dónde apareció (público)
   resuelto_en        TEXT,
+  ayudando           INTEGER DEFAULT 0,         -- coordinación en el punto (daños y ayudas):
+  faltan             INTEGER DEFAULT 0,         --   cuántos ayudan ahora / cuántas manos faltan
+  vigente_en         TEXT,                      -- última señal "sigo aquí, esto sigue vigente"
   creado_en          TEXT DEFAULT (datetime('now')),
   moderado_en        TEXT,
   moderado_por       TEXT
@@ -119,11 +122,14 @@ CREATE TABLE IF NOT EXISTS confirmaciones_log (
   UNIQUE(reporte_id, ip)
 );
 
--- Tracker de avistamientos: "lo vi en tal parte" (mascotas y desaparecidos).
+-- Bitácora del reporte: notas libres de la comunidad ("lo vi en tal parte",
+-- "la calle sigue cerrada") + eventos automáticos (confirmó vigencia, cambió
+-- los contadores de gente). El campo evento distingue: nota | vigente | gente.
 CREATE TABLE IF NOT EXISTS avistamientos (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   reporte_id TEXT NOT NULL,
   nota       TEXT NOT NULL,
+  evento     TEXT DEFAULT 'nota',
   ip         TEXT,
   user_agent TEXT,
   creado_en  TEXT DEFAULT (datetime('now'))
@@ -208,6 +214,15 @@ def init_db() -> None:
             # el RENAME se llevó los índices idx_rep_* y el DROP los eliminó:
             # segunda pasada del SCHEMA para recrearlos sobre la tabla nueva
             conn.executescript(SCHEMA)
+        # migración: coordinación en el punto (fase "gente en el punto")
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(reportes)")}
+        if "ayudando" not in cols:
+            conn.execute("ALTER TABLE reportes ADD COLUMN ayudando INTEGER DEFAULT 0")
+            conn.execute("ALTER TABLE reportes ADD COLUMN faltan INTEGER DEFAULT 0")
+            conn.execute("ALTER TABLE reportes ADD COLUMN vigente_en TEXT")
+        cols_av = {r[1] for r in conn.execute("PRAGMA table_info(avistamientos)")}
+        if "evento" not in cols_av:
+            conn.execute("ALTER TABLE avistamientos ADD COLUMN evento TEXT DEFAULT 'nota'")
         # el caché de geocoding no necesita vivir para siempre
         conn.execute("DELETE FROM geocache WHERE creado_en < datetime('now','-90 days')")
 
@@ -529,6 +544,16 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
 
     canal = data.get("canal") if data.get("canal") in ("web", "whatsapp") else "web"
 
+    # coordinación en el punto: solo daños y ayudas, desde el mismo formulario
+    def _contador(v):
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            return 0
+        return max(0, min(n, 9999))
+    ayudando = _contador(data.get("ayudando")) if tipo in ("dano", "donacion") else 0
+    faltan = _contador(data.get("faltan")) if tipo in ("dano", "donacion") else 0
+
     return {
         "id": rid, "tipo": tipo, "departamento": depto, "ciudad": ciudad,
         "direccion": _texto(data.get("direccion"), 200),
@@ -536,6 +561,7 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
         "descripcion": _texto(data.get("descripcion"), 1000),
         "extras": json.dumps(extras, ensure_ascii=False),
         "telefono_contacto": telefono, "canal": canal, "fotos": None,
+        "ayudando": ayudando, "faltan": faltan,
     }, None
 
 
@@ -575,7 +601,7 @@ def _guardar_foto(fila: dict, foto) -> str | None:
 COLS_PUBLICAS = ("id, tipo, departamento, ciudad, direccion, lat, lng,"
                  " ubicacion_ajustada, descripcion, extras, fotos, canal,"
                  " confirmaciones, resuelto, resuelto_comentario, resuelto_en,"
-                 " creado_en")
+                 " ayudando, faltan, vigente_en, creado_en")
 
 
 def _fila_publica(f: sqlite3.Row) -> dict:
@@ -629,9 +655,11 @@ def crear_reporte():
         with db() as conn:
             conn.execute(
                 "INSERT INTO reportes (id, tipo, departamento, ciudad, direccion, lat, lng,"
-                " ubicacion_ajustada, descripcion, extras, telefono_contacto, canal, fotos)"
+                " ubicacion_ajustada, descripcion, extras, telefono_contacto, canal, fotos,"
+                " ayudando, faltan)"
                 " VALUES (:id, :tipo, :departamento, :ciudad, :direccion, :lat, :lng,"
-                " :ubicacion_ajustada, :descripcion, :extras, :telefono_contacto, :canal, :fotos)",
+                " :ubicacion_ajustada, :descripcion, :extras, :telefono_contacto, :canal, :fotos,"
+                " :ayudando, :faltan)",
                 fila)
             # directorio comunitario: solo direcciones con pin ajustado a mano
             # (las de centroide contaminarían el directorio con puntos genéricos)
@@ -688,7 +716,10 @@ def listar_reportes():
         params.append(request.args["hasta"] + " 23:59:59")
     # última nota de la comunidad (avistamiento / actualización de zona) y su
     # hora, para mostrarla en el resumen y ordenar por actividad reciente
+    # solo notas humanas para el resumen; los eventos automáticos (vigente,
+    # gente) sí cuentan para ordenar por actividad, pero no como "última nota"
     sub_nota = ("(SELECT nota FROM avistamientos a WHERE a.reporte_id=reportes.id"
+                " AND COALESCE(a.evento,'nota')='nota'"
                 " ORDER BY a.creado_en DESC, a.id DESC LIMIT 1)")
     sub_nota_en = "(SELECT MAX(creado_en) FROM avistamientos a WHERE a.reporte_id=reportes.id)"
     with db() as conn:
@@ -996,16 +1027,17 @@ def confirmar_reporte(rid):
 def listar_avistamientos(rid):
     with db() as conn:
         filas = conn.execute(
-            "SELECT nota, creado_en FROM avistamientos WHERE reporte_id=?"
-            " ORDER BY creado_en DESC LIMIT 50", (rid,)).fetchall()
+            "SELECT nota, COALESCE(evento,'nota') AS evento, creado_en"
+            " FROM avistamientos WHERE reporte_id=?"
+            " ORDER BY creado_en DESC, id DESC LIMIT 50", (rid,)).fetchall()
     return jsonify([dict(f) for f in filas])
 
 
 @app.post("/api/reportes/<rid>/avistamientos")
 def crear_avistamiento(rid):
     """Tracker comunitario. En mascotas y desaparecidos son avistamientos
-    ("lo vi en el parque X a las 3pm"); en daños son actualizaciones de la
-    zona ("ya removieron los escombros", "la calle sigue cerrada")."""
+    ("lo vi en el parque X a las 3pm"); en daños y ayudas son actualizaciones
+    de la zona/punto ("ya removieron los escombros", "seguimos recibiendo")."""
     if not _rate_ok(f"avi:{_ip()}", maximo=10, ventana_seg=3600):
         return jsonify({"error": "Demasiados aportes; intenta más tarde"}), 429
     nota = _texto((request.get_json(silent=True) or {}).get("nota"), 300)
@@ -1014,7 +1046,7 @@ def crear_avistamiento(rid):
     with db() as conn:
         f = conn.execute("SELECT tipo, resuelto FROM reportes WHERE id=? AND estado='visible'",
                          (rid,)).fetchone()
-        if not f or f["tipo"] not in ("mascota", "desaparecido", "dano"):
+        if not f or f["tipo"] not in ("mascota", "desaparecido", "dano", "donacion"):
             return jsonify({"error": "Reporte no encontrado"}), 404
         conn.execute("INSERT INTO avistamientos (reporte_id, nota, ip, user_agent)"
                      " VALUES (?,?,?,?)",
@@ -1022,6 +1054,69 @@ def crear_avistamiento(rid):
         total = conn.execute("SELECT COUNT(*) FROM avistamientos WHERE reporte_id=?",
                              (rid,)).fetchone()[0]
     return jsonify({"ok": True, "avistamientos": total})
+
+
+@app.post("/api/reportes/<rid>/gente")
+def actualizar_gente(rid):
+    """Coordinación de voluntarios en el punto (daños y ayudas): cuántas
+    personas están ayudando ahora y cuántas manos faltan. El cliente edita el
+    contador libremente y envía UN solo valor final (nada de un POST por
+    toque): una entrada de bitácora por cambio real. De aquí salen los avisos
+    "no acudir, ya hay N" / "faltan N, ve" que reparten a la gente."""
+    if not _rate_ok(f"gente:{_ip()}", maximo=30, ventana_seg=3600):
+        return jsonify({"error": "Demasiados cambios; intenta más tarde"}), 429
+    data = request.get_json(silent=True) or {}
+    campo, valor = data.get("campo"), data.get("valor")
+    if (campo not in ("ayudando", "faltan") or isinstance(valor, bool)
+            or not isinstance(valor, int) or not 0 <= valor <= 9999):
+        return jsonify({"error": "Cambio no válido"}), 400
+    with db() as conn:
+        f = conn.execute("SELECT tipo, ayudando, faltan FROM reportes"
+                         " WHERE id=? AND estado='visible'", (rid,)).fetchone()
+        if not f or f["tipo"] not in ("dano", "donacion"):
+            return jsonify({"error": "Reporte no encontrado"}), 404
+        if valor != (f[campo] or 0):
+            if campo == "ayudando":
+                # la gente que llega cubre manos que faltaban (y la que se va
+                # las vuelve a dejar pendientes): el total necesario se conserva
+                delta = valor - (f["ayudando"] or 0)
+                faltan = max(0, min(9999, (f["faltan"] or 0) - delta))
+                conn.execute("UPDATE reportes SET ayudando=?, faltan=?,"
+                             " vigente_en=datetime('now') WHERE id=?",
+                             (valor, faltan, rid))
+                texto = f"Personas ayudando ahora: {valor} · manos que faltan: {faltan}"
+            else:
+                conn.execute("UPDATE reportes SET faltan=?, vigente_en=datetime('now')"
+                             " WHERE id=?", (valor, rid))
+                texto = f"Manos que faltan: {valor}"
+            conn.execute("INSERT INTO avistamientos (reporte_id, nota, evento, ip, user_agent)"
+                         " VALUES (?,?,'gente',?,?)",
+                         (rid, texto, _ip(), _texto(request.headers.get("User-Agent"), 300)))
+        fila = conn.execute("SELECT ayudando, faltan, vigente_en FROM reportes WHERE id=?",
+                            (rid,)).fetchone()
+    return jsonify({"ok": True, **dict(fila)})
+
+
+@app.post("/api/reportes/<rid>/vigente")
+def marcar_vigente(rid):
+    """'Sigo aquí, esto sigue vigente': confirmación de frescura con un toque.
+    Actualiza vigente_en (de ahí sale el "hace X min" y el apagado visual de
+    los puntos viejos) y deja constancia en la bitácora."""
+    if not _rate_ok(f"vig:{_ip()}", maximo=10, ventana_seg=3600):
+        return jsonify({"error": "Demasiadas confirmaciones; intenta más tarde"}), 429
+    with db() as conn:
+        f = conn.execute("SELECT tipo FROM reportes WHERE id=? AND estado='visible'",
+                         (rid,)).fetchone()
+        if not f or f["tipo"] not in ("dano", "donacion"):
+            return jsonify({"error": "Reporte no encontrado"}), 404
+        conn.execute("UPDATE reportes SET vigente_en=datetime('now') WHERE id=?", (rid,))
+        conn.execute("INSERT INTO avistamientos (reporte_id, nota, evento, ip, user_agent)"
+                     " VALUES (?,?,'vigente',?,?)",
+                     (rid, "Confirmado en el punto: sigue vigente.",
+                      _ip(), _texto(request.headers.get("User-Agent"), 300)))
+        vigente = conn.execute("SELECT vigente_en FROM reportes WHERE id=?",
+                               (rid,)).fetchone()[0]
+    return jsonify({"ok": True, "vigente_en": vigente})
 
 
 @app.post("/api/reportes/<rid>/encontrado")

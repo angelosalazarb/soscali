@@ -65,7 +65,7 @@ body{
 }
 
 /* ─── Cabecera ─── */
-header.top{padding:14px 20px 10px;max-width:1240px;margin:0 auto}  /* el safe-area superior lo absorbe .disclaimer */
+header.top{position:relative;padding:14px 20px 10px;max-width:1240px;margin:0 auto}  /* el safe-area superior lo absorbe .disclaimer */
 .eyebrow{font-weight:700;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
 h1{font-family:var(--serif);font-weight:400;font-size:clamp(26px,5.4vw,40px);line-height:1.15;letter-spacing:-.01em}
 .sub{font-size:clamp(14px,2.4vw,16px);color:var(--muted);line-height:1.6;margin-top:4px}
@@ -193,6 +193,22 @@ label .req{color:var(--error)}
 .badge.luto{background:rgba(60,56,70,.1);color:#4a4453}
 .badge.acudir{background:rgba(156,53,50,.12);color:var(--error)}
 .badge.cubierto{background:var(--indigo-dim);color:var(--indigo)}
+/* feed de últimas actualizaciones + presencia: texto discreto arriba a la derecha */
+.estado-vivo{position:absolute;top:16px;right:20px;display:flex;gap:10px;align-items:baseline;
+  font-size:12.5px;color:var(--muted);text-align:right}
+.estado-vivo #feed-toggle{background:none;border:none;padding:0;font:inherit;font-size:12.5px;
+  color:var(--muted);cursor:pointer;border-bottom:1px dotted var(--muted)}
+.estado-vivo #feed-toggle:hover{color:var(--indigo);border-bottom-color:var(--indigo)}
+.estado-vivo #en-linea{color:var(--esmeralda);font-weight:700}
+#feed-lista{padding:6px 16px;margin-bottom:12px;max-height:280px;overflow:auto}
+.feed-item{display:block;width:100%;text-align:left;background:none;border:none;
+  border-bottom:1px dashed var(--border);padding:8px 0;font:inherit;font-size:13.5px;
+  color:var(--tinta);cursor:pointer}
+.feed-item:last-child{border-bottom:none}
+.feed-item small{color:var(--muted)}
+.feed-item:hover strong{color:var(--indigo)}
+.n-chip{font-weight:800;margin-left:2px}
+.n-chip.acento{color:var(--error)}
 .badge.tipo-desaparecido{background:var(--indigo-dim);color:var(--indigo)}
 .badge.tipo-donacion{background:rgba(0,51,42,.09);color:var(--verde-prof)}
 .badge.alerta{background:rgba(156,53,50,.12);color:var(--error)}
@@ -317,6 +333,10 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
 </div>
 
 <header class="top">
+  <div class="estado-vivo" id="estado-vivo">
+    <button id="feed-toggle" type="button" aria-expanded="false" aria-controls="feed-lista">Últimas actualizaciones <span id="feed-hora"></span></button>
+    <span id="en-linea" aria-live="polite"></span>
+  </div>
   <p class="eyebrow">Reporte ciudadano · Sismo</p>
   <h1 id="titulo-vista">Mapa de afectaciones</h1>
   <p class="sub" id="sub-vista">Reportes ciudadanos en toda Colombia</p>
@@ -328,12 +348,15 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
 <section data-vista="mapa" aria-label="Mapa de afectaciones">
   <div class="metricas" id="metricas" aria-live="polite"></div>
 
+  <div id="feed-lista" class="card oculto" role="list" aria-label="Últimas actualizaciones"></div>
+
   <div class="chips" id="filtro-tipo" role="group" aria-label="Filtrar por tipo de reporte">
-    <button class="chip" data-tipo="" aria-pressed="true">Todos</button>
+    <button class="chip" data-tipo="" aria-pressed="true">Todos <span class="n-chip" id="n-todos"></span></button>
     <button class="chip" data-tipo="dano" aria-pressed="false">Daños</button>
     <button class="chip" data-tipo="desaparecido,hospital" aria-pressed="false">Desaparecidos</button>
     <button class="chip" data-tipo="donacion" aria-pressed="false">Ayudas</button>
     <button class="chip" data-tipo="mascota" aria-pressed="false">Mascotas</button>
+    <button class="chip" data-tipo="" data-falta="1" aria-pressed="false">Falta gente <span class="n-chip acento" id="n-falta"></span></button>
     <button class="chip" data-tipo="" data-resuelto="1" aria-pressed="false">Encontrados</button>
     <button class="chip" data-tipo="" data-resuelto="2" aria-pressed="false">Fallecidos</button>
   </div>
@@ -1064,7 +1087,8 @@ function navegar(){
   });
   $('#titulo-vista').textContent = TITULOS[v][0];
   $('#sub-vista').textContent = TITULOS[v][1];
-  if (v === 'mapa') setTimeout(() => { Mapa.asegurar(); abrirCompartido(); }, 30);
+  $('#estado-vivo').classList.toggle('oculto', v !== 'mapa');
+  if (v === 'mapa') setTimeout(() => { Mapa.asegurar(); abrirCompartido(); Feed.cargar(); Presencia.ping(); }, 30);
   else if (v === 'desaparecidos')
     Stepper.asegurar(!$('#tab-hospital').classList.contains('oculto') ? 'hospital'
                    : !$('#tab-mascota').classList.contains('oculto') ? 'mascota' : 'desaparecido');
@@ -1073,14 +1097,10 @@ function navegar(){
 }
 window.addEventListener('hashchange', navegar);
 
-/* deep link #r=<id>: un reporte compartido abre directo con su detalle */
-let compartidoAbierto = '';
-async function abrirCompartido(){
-  const m = (location.hash || '').match(/^#r=([\w-]+)$/);
-  if (!m || compartidoAbierto === m[1]) return;
-  compartidoAbierto = m[1];
+/* abrir un reporte por id (deep links y feed): trae el detalle y centra el mapa */
+async function abrirReporte(id){
   try {
-    const res = await fetch('/api/reportes/' + encodeURIComponent(m[1]));
+    const res = await fetch('/api/reportes/' + encodeURIComponent(id));
     if (!res.ok) throw new Error();
     const r = await res.json();
     Mapa.centrar(r.lat, r.lng);
@@ -1088,10 +1108,62 @@ async function abrirCompartido(){
   } catch(e) { toast('Ese reporte ya no está disponible.', 'error'); }
 }
 
+/* deep link #r=<id>: un reporte compartido abre directo con su detalle */
+let compartidoAbierto = '';
+function abrirCompartido(){
+  const m = (location.hash || '').match(/^#r=([\w-]+)$/);
+  if (!m || compartidoAbierto === m[1]) return;
+  compartidoAbierto = m[1];
+  abrirReporte(m[1]);
+}
+
+/* ═══ Feed global de últimas actualizaciones ═══ */
+const Feed = (function(){
+  async function cargar(){
+    const lista = $('#feed-lista'); if (!lista) return;
+    try {
+      const evs = await (await fetch('/api/actualizaciones')).json();
+      $('#feed-hora').textContent = evs.length ? '· ' + fechaCorta(evs[0].creado_en) : '';
+      lista.innerHTML = evs.length ? evs.map(e => {
+        const titulo = e.tipo === 'dano' ? (e.direccion || 'Daño estructural') : tituloReporte(e);
+        const texto = e.evento === 'creado' ? 'Reporte creado.' : (e.nota || '');
+        return `<button class="feed-item" type="button" role="listitem" data-id="${esc(e.reporte_id)}">
+          <small>${esc(fechaCorta(e.creado_en))}</small> · <strong>${esc(titulo)}</strong> — ${esc(texto)}</button>`;
+      }).join('') : '<span style="color:var(--muted)">Aún no hay actividad.</span>';
+      lista.querySelectorAll('.feed-item').forEach(b =>
+        b.addEventListener('click', () => abrirReporte(b.dataset.id)));
+    } catch(e) { /* el feed no es crítico */ }
+  }
+  $('#feed-toggle').addEventListener('click', () => {
+    const abierto = !$('#feed-lista').classList.toggle('oculto');
+    $('#feed-toggle').setAttribute('aria-expanded', abierto);
+    if (abierto) cargar();
+  });
+  return { cargar };
+})();
+
+/* ═══ Presencia: cuántas personas están viendo el mapa ahora ═══ */
+const Presencia = (function(){
+  async function ping(){
+    try {
+      const d = await (await fetch('/api/presencia', {method: 'POST'})).json();
+      if ($('#en-linea') && d.en_linea) $('#en-linea').textContent = `● ${d.en_linea} en línea`;
+    } catch(e) { /* sin conexión: el latido se reintenta en el próximo ciclo */ }
+  }
+  return { ping };
+})();
+
+/* refresco en vivo: con el mapa activo, todo se actualiza solo cada minuto */
+setInterval(() => {
+  if (!document.hidden && $('section[data-vista="mapa"]').classList.contains('activa')) {
+    Mapa.recargar(); Feed.cargar(); Presencia.ping();
+  }
+}, 60000);
+
 /* ═══ Mapa principal ═══ */
 const Mapa = (function(){
   let mapa = null, capa = null, reportes = [], busqueda = '';
-  const filtro = { tipo:'', departamento:'', ciudad:'', fecha:'', resuelto:'' };
+  const filtro = { tipo:'', departamento:'', ciudad:'', fecha:'', resuelto:'', falta:'' };
 
   // texto buscable de un reporte: título, ubicación y TODOS los campos de
   // extras (nombre, raza, especie, hospital, insumos…) + la última nota
@@ -1123,6 +1195,7 @@ const Mapa = (function(){
     const p = new URLSearchParams();
     if (filtro.tipo) p.set('tipo', filtro.tipo);
     if (filtro.resuelto) p.set('resuelto', filtro.resuelto);
+    if (filtro.falta) p.set('falta_gente', '1');
     if (filtro.departamento) p.set('departamento', filtro.departamento);
     if (filtro.ciudad) p.set('ciudad', filtro.ciudad);
     if (filtro.fecha) {
@@ -1219,6 +1292,8 @@ const Mapa = (function(){
         <div class="metrica"><span class="valor">${m.por_tipo.mascota || 0}</span><span class="nombre">${svgIcono('mascota','#3d2e8a',14)} Mascotas perdidas</span></div>
         <div class="metrica"><span class="valor">${m.total}</span><span class="nombre">Reportes totales</span></div>
         <div class="metrica"><span class="valor" style="color:var(--esmeralda)">${m.encontrados || 0}</span><span class="nombre">Encontrados</span></div>`;
+      if ($('#n-todos')) $('#n-todos').textContent = m.total || '';
+      if ($('#n-falta')) $('#n-falta').textContent = m.faltan_gente || '';
     } catch(e) { /* métricas no críticas */ }
   }
 
@@ -1354,6 +1429,7 @@ async function textoCompartir(r, url){
     // excluyentes, como el resto de los chips)
     Mapa.filtro.tipo = btn.dataset.tipo || '';
     Mapa.filtro.resuelto = btn.dataset.resuelto || '';
+    Mapa.filtro.falta = btn.dataset.falta || '';
     Mapa.recargar();
   });
   const alternar = () => {

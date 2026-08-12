@@ -706,6 +706,8 @@ def listar_reportes():
     if request.args.get("resuelto") in ("0", "1", "2"):
         filtros.append("resuelto=?")
         params.append(int(request.args["resuelto"]))
+    if request.args.get("falta_gente") == "1":
+        filtros.append("faltan > 0")
     # subtipo de ayuda (acopio | refugio) vía json_extract, parametrizado
     if request.args.get("subtipo") in ("acopio", "refugio"):
         if request.args["subtipo"] == "refugio":
@@ -1071,6 +1073,45 @@ def crear_avistamiento(rid):
     return jsonify({"ok": True, "avistamientos": total})
 
 
+@app.get("/api/actualizaciones")
+def actualizaciones():
+    """Feed global del mapa: la actividad más reciente de todos los puntos
+    (notas, confirmaciones de vigencia, gente, necesidades y reportes
+    nuevos). Solo columnas públicas — jamás teléfonos."""
+    with db() as conn:
+        eventos = [dict(f) for f in conn.execute(
+            "SELECT a.reporte_id, a.nota, COALESCE(a.evento,'nota') AS evento,"
+            " a.creado_en, r.tipo, r.ciudad, r.direccion, r.extras"
+            " FROM avistamientos a JOIN reportes r ON r.id=a.reporte_id"
+            " WHERE r.estado='visible'"
+            " ORDER BY a.creado_en DESC, a.id DESC LIMIT 20")]
+        eventos += [dict(f) for f in conn.execute(
+            "SELECT id AS reporte_id, NULL AS nota, 'creado' AS evento,"
+            " creado_en, tipo, ciudad, direccion, extras"
+            " FROM reportes WHERE estado='visible'"
+            " ORDER BY creado_en DESC LIMIT 10")]
+    for e in eventos:
+        e["extras"] = json.loads(e.get("extras") or "{}")
+    eventos.sort(key=lambda e: e["creado_en"], reverse=True)
+    return jsonify(eventos[:20])
+
+
+# presencia anónima en memoria: suficiente con 1 worker de gunicorn (deploy)
+_presencia: dict[str, float] = {}
+
+
+@app.post("/api/presencia")
+def presencia():
+    """Latido de presencia: el cliente hace ping cada minuto y esto devuelve
+    cuántas IPs distintas dieron señales en los últimos 5 minutos."""
+    ahora = time.monotonic()
+    _presencia[_ip()] = ahora
+    for ip, t in list(_presencia.items()):
+        if ahora - t > 300:
+            _presencia.pop(ip, None)
+    return jsonify({"en_linea": len(_presencia)})
+
+
 @app.get("/api/avistamientos/<int:aid>/foto")
 def foto_avistamiento(aid):
     """Foto adjunta a una nota de la bitácora. Solo si el reporte padre sigue
@@ -1291,8 +1332,11 @@ def metricas():
             " WHERE estado='visible' GROUP BY departamento, ciudad ORDER BY n DESC")]
         total = conn.execute("SELECT COUNT(*) FROM reportes"
                              " WHERE estado='visible'").fetchone()[0]
+        faltan_gente = conn.execute("SELECT COUNT(*) FROM reportes"
+                                    " WHERE estado='visible' AND faltan>0").fetchone()[0]
     return jsonify({"por_tipo": por_tipo, "por_ciudad": por_ciudad,
-                    "total": total, "encontrados": encontrados,
+                    "total": total, "faltan_gente": faltan_gente,
+                    "encontrados": encontrados,
                     "acopios": ayuda["acopios"] or 0, "refugios": ayuda["refugios"] or 0})
 
 

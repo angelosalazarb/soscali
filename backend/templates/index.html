@@ -410,6 +410,11 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
       <button type="button" class="chip" data-valor="no" aria-pressed="false">No</button>
       <button type="button" class="chip" data-valor="" aria-pressed="true">No sé</button>
     </div>
+    <div id="dano-atrapadas-n" class="oculto">
+      <label for="dano-atrapadas-cuantas">¿Cuántas aproximadamente?</label>
+      <input type="number" id="dano-atrapadas-cuantas" min="0" max="9999" inputmode="numeric" placeholder="Si no sabes, déjalo vacío">
+      <p class="ayuda">La comunidad podrá ir actualizando este número a medida que rescaten personas.</p>
+    </div>
 
     <label>¿Se necesita ayuda en el lugar?</label>
     <div class="chips" id="dano-ayuda" role="group" aria-label="¿Se necesita ayuda en el lugar?">
@@ -1293,6 +1298,9 @@ const Mapa = (function(){
         ${r.resuelto ? `<p><span class="badge ${r.resuelto === 2 ? 'luto">Fallecido' : esOferta(r) ? 'leve">Entregada' : 'leve">Encontrado'}</span></p>`
           : (r.tipo === 'mascota' && r.extras.situacion === 'encontrada'
              ? '<p><span class="badge leve">Encontrada — buscan a sus dueños</span></p>' : '')}
+        ${r.tipo === 'dano' && !r.resuelto && ((r.atrapadas || 0) > 0 || r.extras.personas_atrapadas)
+          ? `<p><span class="badge alerta">${(r.atrapadas || 0) > 0
+              ? `‼️ ${r.atrapadas} ${r.atrapadas === 1 ? 'atrapada' : 'atrapadas'}` : 'Posibles atrapadas'}</span></p>` : ''}
         ${coordBadges(r) || esApagado(r) ? `<p>${coordBadges(r)}${esApagado(r)
           ? ` <span style="color:var(--error);font-size:12.5px">sin confirmar ${haceTexto(ultimaActividad(r))}</span>` : ''}</p>` : ''}
         ${necesita ? `<p style="color:var(--indigo);font-weight:600">${esc(necesita)}</p>` : ''}
@@ -1393,7 +1401,9 @@ async function textoCompartir(r, url){
   L.push(`🆘 ${nombreTipo(r)} — ${titulo}`);
   L.push(`📍 ${r.ciudad}, ${r.departamento}${r.direccion && r.tipo !== 'dano' ? ' — ' + r.direccion : ''}`);
   if (r.tipo === 'dano') {
-    L.push(`Severidad: ${SEV_NOMBRE[r.extras.severidad] || 'daño'}${r.extras.personas_atrapadas ? ' · ⚠️ PERSONAS ATRAPADAS' : ''}`);
+    L.push(`Severidad: ${SEV_NOMBRE[r.extras.severidad] || 'daño'}${(r.atrapadas || 0) > 0
+      ? ` · ‼️ ${r.atrapadas} PERSONAS ATRAPADAS`
+      : r.extras.personas_atrapadas ? ' · ⚠️ POSIBLES PERSONAS ATRAPADAS' : ''}`);
     const nec = [...(r.extras.ayuda_tipos || []).map(t => AYUDA_NOMBRE[t] || t),
                  ...(r.extras.necesidades || [])].join(', ') || r.extras.ayuda_detalle;
     if (nec) L.push(`Se necesita: ${nec}`);
@@ -1506,8 +1516,10 @@ const Detalle = (function(){
     const oferta = esOferta(r);
     const enPunto = ['dano','donacion'].includes(r.tipo) && !r.resuelto && !oferta;
     if (r.tipo === 'dano') {
+      const nAtr = r.atrapadas || 0;
       html += `<div style="margin-top:10px"><span class="badge ${r.extras.severidad}">${svgIcono('dano','currentColor',13)} Severidad: ${SEV_NOMBRE[r.extras.severidad]}</span>
-        ${r.extras.personas_atrapadas ? ' <span class="badge alerta">Posibles personas atrapadas — 123</span>' : ''}</div>`;
+        ${nAtr > 0 ? ` <span class="badge alerta">‼️ ${nAtr} ${nAtr === 1 ? 'persona atrapada' : 'personas atrapadas'}</span>`
+          : r.extras.personas_atrapadas ? ' <span class="badge alerta">Posibles personas atrapadas</span>' : ''}</div>`;
       if (r.extras.necesita_ayuda && !enPunto) {
         const tipos = (r.extras.ayuda_tipos || []).map(t => `<span class="badge tipo-desaparecido">${AYUDA_NOMBRE[t] || esc(t)}</span>`).join(' ');
         html += `<div class="dato"><div class="clave">Se necesita ayuda</div><div class="valor-d">${tipos || '—'}</div></div>`;
@@ -1606,6 +1618,12 @@ const Detalle = (function(){
           <span class="rotulo">manos que todavía faltan</span>
           <button class="btn mini-gente" data-campo="faltan" data-delta="-1" aria-label="Una mano menos por cubrir">−</button>
           <button class="btn mini-gente" data-campo="faltan" data-delta="1" aria-label="Una mano más por cubrir">+</button></div>
+        ${r.tipo === 'dano' ? `
+        <div class="fila-gente"><input class="num-gente" id="num-atrapadas" type="number" min="0" max="9999"
+            inputmode="numeric" value="${r.atrapadas || 0}" style="color:var(--vino)" aria-label="Personas atrapadas aproximadas">
+          <span class="rotulo">personas atrapadas (aprox.)</span>
+          <button class="btn mini-gente" data-campo="atrapadas" data-delta="-1" aria-label="Una persona menos atrapada">−</button>
+          <button class="btn mini-gente" data-campo="atrapadas" data-delta="1" aria-label="Una persona más atrapada">+</button></div>` : ''}
       </div></div>`;
     }
     const buscable = ['desaparecido','hospital','mascota'].includes(r.tipo);
@@ -1700,7 +1718,8 @@ const Detalle = (function(){
     // valor final se envía UNA vez tras una pausa (un POST y una entrada de
     // bitácora por cambio real, no uno por toque)
     const timersGente = {};
-    const inputGente = campo => $(campo === 'ayudando' ? '#num-ayudando' : '#num-faltan');
+    const inputGente = campo => $(campo === 'ayudando' ? '#num-ayudando'
+                                : campo === 'atrapadas' ? '#num-atrapadas' : '#num-faltan');
     function programarGente(campo){
       clearTimeout(timersGente[campo]);
       timersGente[campo] = setTimeout(async () => {
@@ -1716,8 +1735,11 @@ const Detalle = (function(){
           const d = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
           r.ayudando = d.ayudando; r.faltan = d.faltan; r.vigente_en = d.vigente_en;
+          if (d.atrapadas !== undefined) r.atrapadas = d.atrapadas;
+          if (d.extras) r.extras = d.extras;
           if ($('#num-ayudando')) $('#num-ayudando').value = d.ayudando;
           if ($('#num-faltan')) $('#num-faltan').value = d.faltan;
+          if ($('#num-atrapadas') && d.atrapadas !== undefined) $('#num-atrapadas').value = d.atrapadas;
           Avistamiento.cargar(r.id); Mapa.recargar();
         } catch(e) { toast(e.message === 'Failed to fetch' ? 'Sin conexión; intenta de nuevo.' : e.message, 'error'); }
       }, 900);
@@ -1728,7 +1750,8 @@ const Detalle = (function(){
       programarGente(b.dataset.campo);
     }));
     $$('#sheet-contenido .num-gente').forEach(inp => inp.addEventListener('input', () =>
-      programarGente(inp.id === 'num-ayudando' ? 'ayudando' : 'faltan')));
+      programarGente(inp.id === 'num-ayudando' ? 'ayudando'
+                   : inp.id === 'num-atrapadas' ? 'atrapadas' : 'faltan')));
     // "qué se necesita" editable: chips con ✕ para quitar + añadir inline
     const necesidadesDe = () =>
       (r.tipo === 'dano' ? (r.extras.ayuda_tipos || []) : []).concat(r.extras.necesidades || []);
@@ -2223,6 +2246,8 @@ function pantallaExito(idExito, idForm, mensaje){
 const fotoDano = montarFoto('#dano-foto', '#dano-foto-prev');
 const leerSev = chipUnico('#sev-dano');
 const leerAtrapadas = chipUnico('#dano-atrapadas');
+$('#dano-atrapadas').addEventListener('click', () =>
+  $('#dano-atrapadas-n').classList.toggle('oculto', leerAtrapadas() !== 'si'));
 const leerAyuda = chipUnico('#dano-ayuda');
 const leerAyudaTipos = chipsMulti('#dano-ayuda-tipos');
 // el bloque de detalle de ayuda solo aparece si se marca "Sí"
@@ -2250,6 +2275,7 @@ $('#form-dano').addEventListener('submit', async e => {
   }
   const payload = {
     id: crypto.randomUUID(), tipo: 'dano', ...ubic, ...gente,
+    atrapadas: atr === 'si' ? Math.max(0, parseInt($('#dano-atrapadas-cuantas').value, 10) || 0) : 0,
     descripcion: $('#dano-desc').value.trim(),
     foto: fotoDano.valor(),
     extras,

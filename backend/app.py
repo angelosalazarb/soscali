@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS reportes (
   resuelto_en        TEXT,
   ayudando           INTEGER DEFAULT 0,         -- coordinación en el punto (daños y ayudas):
   faltan             INTEGER DEFAULT 0,         --   cuántos ayudan ahora / cuántas manos faltan
+  atrapadas          INTEGER DEFAULT 0,         -- personas atrapadas aprox. (solo daños, editable por la comunidad)
   vigente_en         TEXT,                      -- última señal "sigo aquí, esto sigue vigente"
   creado_en          TEXT DEFAULT (datetime('now')),
   moderado_en        TEXT,
@@ -222,6 +223,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE reportes ADD COLUMN ayudando INTEGER DEFAULT 0")
             conn.execute("ALTER TABLE reportes ADD COLUMN faltan INTEGER DEFAULT 0")
             conn.execute("ALTER TABLE reportes ADD COLUMN vigente_en TEXT")
+        if "atrapadas" not in cols:
+            conn.execute("ALTER TABLE reportes ADD COLUMN atrapadas INTEGER DEFAULT 0")
         cols_av = {r[1] for r in conn.execute("PRAGMA table_info(avistamientos)")}
         if "evento" not in cols_av:
             conn.execute("ALTER TABLE avistamientos ADD COLUMN evento TEXT DEFAULT 'nota'")
@@ -574,6 +577,9 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
         return max(0, min(n, 9999))
     ayudando = _contador(data.get("ayudando")) if tipo in ("dano", "donacion") else 0
     faltan = _contador(data.get("faltan")) if tipo in ("dano", "donacion") else 0
+    atrapadas = _contador(data.get("atrapadas")) if tipo == "dano" else 0
+    if atrapadas:
+        extras["personas_atrapadas"] = True
 
     return {
         "id": rid, "tipo": tipo, "departamento": depto, "ciudad": ciudad,
@@ -582,7 +588,7 @@ def validar_reporte(data: dict) -> tuple[dict | None, str | None]:
         "descripcion": _texto(data.get("descripcion"), 1000),
         "extras": json.dumps(extras, ensure_ascii=False),
         "telefono_contacto": telefono, "canal": canal, "fotos": None,
-        "ayudando": ayudando, "faltan": faltan,
+        "ayudando": ayudando, "faltan": faltan, "atrapadas": atrapadas,
     }, None
 
 
@@ -622,7 +628,7 @@ def _guardar_foto(fila: dict, foto) -> str | None:
 COLS_PUBLICAS = ("id, tipo, departamento, ciudad, direccion, lat, lng,"
                  " ubicacion_ajustada, descripcion, extras, fotos, canal,"
                  " confirmaciones, resuelto, resuelto_comentario, resuelto_en,"
-                 " ayudando, faltan, vigente_en, creado_en")
+                 " ayudando, faltan, atrapadas, vigente_en, creado_en")
 
 
 def _fila_publica(f: sqlite3.Row) -> dict:
@@ -677,10 +683,10 @@ def crear_reporte():
             conn.execute(
                 "INSERT INTO reportes (id, tipo, departamento, ciudad, direccion, lat, lng,"
                 " ubicacion_ajustada, descripcion, extras, telefono_contacto, canal, fotos,"
-                " ayudando, faltan)"
+                " ayudando, faltan, atrapadas)"
                 " VALUES (:id, :tipo, :departamento, :ciudad, :direccion, :lat, :lng,"
                 " :ubicacion_ajustada, :descripcion, :extras, :telefono_contacto, :canal, :fotos,"
-                " :ayudando, :faltan)",
+                " :ayudando, :faltan, :atrapadas)",
                 fila)
             # directorio comunitario: solo direcciones con pin ajustado a mano
             # (las de centroide contaminarían el directorio con puntos genéricos)
@@ -1201,24 +1207,27 @@ def actualizar_necesidades(rid):
 
 @app.post("/api/reportes/<rid>/gente")
 def actualizar_gente(rid):
-    """Coordinación de voluntarios en el punto (daños y ayudas): cuántas
-    personas están ayudando ahora y cuántas manos faltan. El cliente edita el
+    """Coordinación en el punto (daños y ayudas): cuántas personas ayudan
+    ahora, cuántas manos faltan y — solo en daños — cuántas personas siguen
+    atrapadas (aprox.), todo mantenido por la comunidad. El cliente edita el
     contador libremente y envía UN solo valor final (nada de un POST por
-    toque): una entrada de bitácora por cambio real. De aquí salen los avisos
-    "no acudir, ya hay N" / "faltan N, ve" que reparten a la gente."""
+    toque): una entrada de bitácora por cambio real."""
     if not _rate_ok(f"gente:{_ip()}", maximo=30, ventana_seg=3600):
         return jsonify({"error": "Demasiados cambios; intenta más tarde"}), 429
     data = request.get_json(silent=True) or {}
     campo, valor = data.get("campo"), data.get("valor")
-    if (campo not in ("ayudando", "faltan") or isinstance(valor, bool)
+    if (campo not in ("ayudando", "faltan", "atrapadas") or isinstance(valor, bool)
             or not isinstance(valor, int) or not 0 <= valor <= 9999):
         return jsonify({"error": "Cambio no válido"}), 400
     with db() as conn:
-        f = conn.execute("SELECT tipo, ayudando, faltan, extras FROM reportes"
+        f = conn.execute("SELECT tipo, ayudando, faltan, atrapadas, extras FROM reportes"
                          " WHERE id=? AND estado='visible'", (rid,)).fetchone()
         if not f or f["tipo"] not in ("dano", "donacion"):
             return jsonify({"error": "Reporte no encontrado"}), 404
-        if json.loads(f["extras"] or "{}").get("subtipo") == "oferta":
+        if campo == "atrapadas" and f["tipo"] != "dano":
+            return jsonify({"error": "Reporte no encontrado"}), 404
+        extras = json.loads(f["extras"] or "{}")
+        if extras.get("subtipo") == "oferta":
             # una oferta de donación no coordina voluntarios
             return jsonify({"error": "Reporte no encontrado"}), 404
         if valor != (f[campo] or 0):
@@ -1231,6 +1240,15 @@ def actualizar_gente(rid):
                              " vigente_en=datetime('now') WHERE id=?",
                              (valor, faltan, rid))
                 texto = f"Personas ayudando ahora: {valor} · manos que faltan: {faltan}"
+            elif campo == "atrapadas":
+                # el contador manda sobre la marca del formulario: >0 la
+                # enciende, 0 la apaga (rescatados = deja de alarmar)
+                extras["personas_atrapadas"] = valor > 0
+                conn.execute("UPDATE reportes SET atrapadas=?, extras=?,"
+                             " vigente_en=datetime('now') WHERE id=?",
+                             (valor, json.dumps(extras, ensure_ascii=False), rid))
+                texto = (f"Personas atrapadas (aprox.): {valor}" if valor > 0
+                         else "Sin personas atrapadas: todas rescatadas o descartado.")
             else:
                 conn.execute("UPDATE reportes SET faltan=?, vigente_en=datetime('now')"
                              " WHERE id=?", (valor, rid))
@@ -1238,9 +1256,11 @@ def actualizar_gente(rid):
             conn.execute("INSERT INTO avistamientos (reporte_id, nota, evento, ip, user_agent)"
                          " VALUES (?,?,'gente',?,?)",
                          (rid, texto, _ip(), _texto(request.headers.get("User-Agent"), 300)))
-        fila = conn.execute("SELECT ayudando, faltan, vigente_en FROM reportes WHERE id=?",
-                            (rid,)).fetchone()
-    return jsonify({"ok": True, **dict(fila)})
+        fila = conn.execute("SELECT ayudando, faltan, atrapadas, extras, vigente_en"
+                            " FROM reportes WHERE id=?", (rid,)).fetchone()
+    d = dict(fila)
+    d["extras"] = json.loads(d.get("extras") or "{}")
+    return jsonify({"ok": True, **d})
 
 
 @app.post("/api/reportes/<rid>/vigente")

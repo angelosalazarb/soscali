@@ -39,6 +39,7 @@ import re
 import sqlite3
 import time
 import unicodedata
+import uuid
 from collections import defaultdict, deque
 from pathlib import Path
 
@@ -130,6 +131,7 @@ CREATE TABLE IF NOT EXISTS avistamientos (
   reporte_id TEXT NOT NULL,
   nota       TEXT NOT NULL,
   evento     TEXT DEFAULT 'nota',
+  foto       TEXT,                              -- foto adjunta a la nota (data/fotos/av-*)
   ip         TEXT,
   user_agent TEXT,
   creado_en  TEXT DEFAULT (datetime('now'))
@@ -223,6 +225,8 @@ def init_db() -> None:
         cols_av = {r[1] for r in conn.execute("PRAGMA table_info(avistamientos)")}
         if "evento" not in cols_av:
             conn.execute("ALTER TABLE avistamientos ADD COLUMN evento TEXT DEFAULT 'nota'")
+        if "foto" not in cols_av:
+            conn.execute("ALTER TABLE avistamientos ADD COLUMN foto TEXT")
         # el caché de geocoding no necesita vivir para siempre
         conn.execute("DELETE FROM geocache WHERE creado_en < datetime('now','-90 days')")
 
@@ -1027,7 +1031,7 @@ def confirmar_reporte(rid):
 def listar_avistamientos(rid):
     with db() as conn:
         filas = conn.execute(
-            "SELECT nota, COALESCE(evento,'nota') AS evento, creado_en"
+            "SELECT id, nota, COALESCE(evento,'nota') AS evento, foto, creado_en"
             " FROM avistamientos WHERE reporte_id=?"
             " ORDER BY creado_en DESC, id DESC LIMIT 50", (rid,)).fetchall()
     return jsonify([dict(f) for f in filas])
@@ -1040,20 +1044,91 @@ def crear_avistamiento(rid):
     de la zona/punto ("ya removieron los escombros", "seguimos recibiendo")."""
     if not _rate_ok(f"avi:{_ip()}", maximo=10, ventana_seg=3600):
         return jsonify({"error": "Demasiados aportes; intenta más tarde"}), 429
-    nota = _texto((request.get_json(silent=True) or {}).get("nota"), 300)
+    data = request.get_json(silent=True) or {}
+    nota = _texto(data.get("nota"), 300)
     if len(nota) < 5:
         return jsonify({"error": "Cuéntanos qué viste, dónde y cuándo"}), 400
+    # foto opcional adjunta a la nota: mismo pipeline que las fotos de reportes,
+    # con nombre propio (av-<uuid>) para no pisar la foto del reporte
+    foto_nombre = None
+    if data.get("foto"):
+        fila_foto = {"id": "av-" + uuid.uuid4().hex, "fotos": None}
+        err = _guardar_foto(fila_foto, data["foto"])
+        if err:
+            return jsonify({"error": err}), 400
+        foto_nombre = fila_foto["fotos"]
     with db() as conn:
         f = conn.execute("SELECT tipo, resuelto FROM reportes WHERE id=? AND estado='visible'",
                          (rid,)).fetchone()
         if not f or f["tipo"] not in ("mascota", "desaparecido", "dano", "donacion"):
             return jsonify({"error": "Reporte no encontrado"}), 404
-        conn.execute("INSERT INTO avistamientos (reporte_id, nota, ip, user_agent)"
-                     " VALUES (?,?,?,?)",
-                     (rid, nota, _ip(), _texto(request.headers.get("User-Agent"), 300)))
+        conn.execute("INSERT INTO avistamientos (reporte_id, nota, foto, ip, user_agent)"
+                     " VALUES (?,?,?,?,?)",
+                     (rid, nota, foto_nombre, _ip(),
+                      _texto(request.headers.get("User-Agent"), 300)))
         total = conn.execute("SELECT COUNT(*) FROM avistamientos WHERE reporte_id=?",
                              (rid,)).fetchone()[0]
     return jsonify({"ok": True, "avistamientos": total})
+
+
+@app.get("/api/avistamientos/<int:aid>/foto")
+def foto_avistamiento(aid):
+    """Foto adjunta a una nota de la bitácora. Solo si el reporte padre sigue
+    visible: ocultar el reporte oculta también sus fotos de bitácora."""
+    with db() as conn:
+        f = conn.execute(
+            "SELECT a.foto FROM avistamientos a JOIN reportes r ON r.id=a.reporte_id"
+            " WHERE a.id=? AND r.estado='visible'", (aid,)).fetchone()
+    if not f or not f["foto"]:
+        return jsonify({"error": "Sin foto"}), 404
+    return send_from_directory(FOTOS_DIR, f["foto"])
+
+
+@app.post("/api/reportes/<rid>/necesidades")
+def actualizar_necesidades(rid):
+    """'Qué se necesita' vivo (daños y ayudas): cualquiera agrega o quita
+    necesidades según cambie la situación del punto, sin crear reportes
+    nuevos. Cada cambio real queda en la bitácora y refresca la vigencia."""
+    if not _rate_ok(f"nec:{_ip()}", maximo=20, ventana_seg=3600):
+        return jsonify({"error": "Demasiados cambios; intenta más tarde"}), 429
+    data = request.get_json(silent=True) or {}
+    accion = data.get("accion")
+    valor = _texto(data.get("valor"), 40)
+    if accion not in ("agregar", "quitar") or len(valor) < 2:
+        return jsonify({"error": "Cambio no válido"}), 400
+    with db() as conn:
+        f = conn.execute("SELECT tipo, extras FROM reportes WHERE id=? AND estado='visible'",
+                         (rid,)).fetchone()
+        if not f or f["tipo"] not in ("dano", "donacion"):
+            return jsonify({"error": "Reporte no encontrado"}), 404
+        extras = json.loads(f["extras"] or "{}")
+        lista = list(extras.get("necesidades") or [])
+        cambiado = False
+        if accion == "agregar":
+            if len(lista) >= 20:
+                return jsonify({"error": "Máximo 20 necesidades por punto"}), 400
+            if valor not in lista:
+                lista.append(valor)
+                cambiado = True
+        elif valor in lista:
+            lista.remove(valor)
+            cambiado = True
+        elif f["tipo"] == "dano" and valor in (extras.get("ayuda_tipos") or []):
+            # las necesidades marcadas al crear el daño también se pueden quitar
+            extras["ayuda_tipos"] = [t for t in extras["ayuda_tipos"] if t != valor]
+            cambiado = True
+        if cambiado:
+            extras["necesidades"] = lista
+            if f["tipo"] == "dano":
+                extras["necesita_ayuda"] = bool(lista or extras.get("ayuda_tipos"))
+            conn.execute("UPDATE reportes SET extras=?, vigente_en=datetime('now')"
+                         " WHERE id=?", (json.dumps(extras, ensure_ascii=False), rid))
+            resumen = ", ".join((extras.get("ayuda_tipos") or []) + lista) or "nada por ahora"
+            conn.execute("INSERT INTO avistamientos (reporte_id, nota, evento, ip, user_agent)"
+                         " VALUES (?,?,'necesidades',?,?)",
+                         (rid, f"Se necesita: {resumen}", _ip(),
+                          _texto(request.headers.get("User-Agent"), 300)))
+    return jsonify({"ok": True, "extras": extras})
 
 
 @app.post("/api/reportes/<rid>/gente")

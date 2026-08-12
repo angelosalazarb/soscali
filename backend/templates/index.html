@@ -729,6 +729,9 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
     <label for="ma-nota">Qué viste <span class="req" aria-hidden="true">*</span></label>
     <textarea id="ma-nota" maxlength="300" placeholder="Ej.: lo vi hoy ~4pm en el parque de la 14 con 5, iba hacia el sur"></textarea>
     <p class="error-campo" id="err-ma">Escribe dónde y cuándo (mínimo 5 letras).</p>
+    <label for="ma-foto">Foto (opcional)</label>
+    <input type="file" id="ma-foto" accept="image/*">
+    <div id="ma-foto-prev"></div>
     <div style="display:flex;gap:9px;margin-top:18px">
       <button class="btn" id="ma-cancelar" style="flex:1">Cancelar</button>
       <button class="btn primario" id="ma-enviar" style="flex:1">Enviar pista</button>
@@ -1181,8 +1184,9 @@ const Mapa = (function(){
         necesita = 'Refugio' + (r.extras.capacidad != null ? ` · ${r.extras.capacidad} cupos` : '')
                  + (s.length ? ' · ' + s.join(', ') : '');
       }
-      if (r.tipo === 'dano' && r.extras.necesita_ayuda)
-        necesita = 'Necesita ayuda: ' + ((r.extras.ayuda_tipos || []).map(t => AYUDA_NOMBRE[t] || t).join(', ') || 'ver detalle');
+      if (r.tipo === 'dano' && (r.extras.necesita_ayuda || (r.extras.necesidades || []).length))
+        necesita = 'Necesita ayuda: ' + ([...(r.extras.ayuda_tipos || []).map(t => AYUDA_NOMBRE[t] || t),
+                                          ...(r.extras.necesidades || [])].join(', ') || 'ver detalle');
       el.innerHTML = `${r.fotos
           ? `<img class="icono" src="/api/reportes/${encodeURIComponent(r.id)}/foto" alt="" loading="lazy"
                style="width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid var(--border);flex:none">`
@@ -1285,17 +1289,16 @@ async function textoCompartir(r, url){
   L.push(`📍 ${r.ciudad}, ${r.departamento}${r.direccion && r.tipo !== 'dano' ? ' — ' + r.direccion : ''}`);
   if (r.tipo === 'dano') {
     L.push(`Severidad: ${SEV_NOMBRE[r.extras.severidad] || 'daño'}${r.extras.personas_atrapadas ? ' · ⚠️ PERSONAS ATRAPADAS' : ''}`);
-    const nec = r.extras.ayuda_detalle
-             || (r.extras.ayuda_tipos || []).map(t => AYUDA_NOMBRE[t] || t).join(', ');
-    if (r.extras.necesita_ayuda && nec) L.push(`Se necesita: ${nec}`);
+    const nec = [...(r.extras.ayuda_tipos || []).map(t => AYUDA_NOMBRE[t] || t),
+                 ...(r.extras.necesidades || [])].join(', ') || r.extras.ayuda_detalle;
+    if (nec) L.push(`Se necesita: ${nec}`);
   } else if (r.tipo === 'donacion') {
     if (esRefugio(r)) {
       const serv = (r.extras.servicios || []).map(s => SERVICIO_NOMBRE[s] || s).join(', ');
       L.push(`Refugio${r.extras.capacidad != null ? ` · ${r.extras.capacidad} cupos` : ''}${serv ? ' · ' + serv : ''}`);
-    } else {
-      const nec = (r.extras.necesidades || []).map(n => NEC_NOMBRE[n] || n).join(', ');
-      if (nec) L.push(`Se necesita: ${nec}`);
     }
+    const nec = (r.extras.necesidades || []).map(n => NEC_NOMBRE[n] || n).join(', ');
+    if (nec) L.push(`Se necesita: ${nec}`);
     if (r.extras.horario) L.push(`Horario: ${r.extras.horario}`);
   }
   if (['dano','donacion'].includes(r.tipo) && !r.resuelto) {
@@ -1386,14 +1389,16 @@ const Detalle = (function(){
       html += `<img src="/api/reportes/${encodeURIComponent(r.id)}/foto" alt="${altFoto}"
         style="width:100%;max-height:320px;object-fit:contain;background:var(--faint);border-radius:14px;border:1px solid var(--border);margin-top:12px" loading="lazy">`;
     }
+    // los puntos activos (daños y ayudas) tienen coordinación y necesidades editables
+    const enPunto = ['dano','donacion'].includes(r.tipo) && !r.resuelto;
     if (r.tipo === 'dano') {
       html += `<div style="margin-top:10px"><span class="badge ${r.extras.severidad}">${svgIcono('dano','currentColor',13)} Severidad: ${SEV_NOMBRE[r.extras.severidad]}</span>
         ${r.extras.personas_atrapadas ? ' <span class="badge alerta">Posibles personas atrapadas — 123</span>' : ''}</div>`;
-      if (r.extras.necesita_ayuda) {
+      if (r.extras.necesita_ayuda && !enPunto) {
         const tipos = (r.extras.ayuda_tipos || []).map(t => `<span class="badge tipo-desaparecido">${AYUDA_NOMBRE[t] || esc(t)}</span>`).join(' ');
-        html += `<div class="dato"><div class="clave">Se necesita ayuda</div><div class="valor-d">${tipos || '—'}</div></div>`
-              + fila('Qué se necesita', r.extras.ayuda_detalle);
+        html += `<div class="dato"><div class="clave">Se necesita ayuda</div><div class="valor-d">${tipos || '—'}</div></div>`;
       }
+      if (r.extras.necesita_ayuda) html += fila('Detalle de lo que se necesita', r.extras.ayuda_detalle);
     }
     if (r.tipo === 'desaparecido') {
       html += fila('Edad aproximada', r.extras.edad != null ? r.extras.edad + ' años' : '')
@@ -1419,9 +1424,11 @@ const Detalle = (function(){
             + fila('Ingresó', r.extras.fecha_ingreso);
     }
     if (r.tipo === 'donacion' && !esRefugio(r)) {
-      const nec = (r.extras.necesidades || []).map(n => `<span class="badge tipo-donacion">${NEC_NOMBRE[n] || esc(n)}</span>`).join(' ');
-      html += `<div class="dato"><div class="clave">Se necesita</div><div class="valor-d">${nec || '—'}</div></div>`
-            + fila('Horario', r.extras.horario);
+      if (!enPunto) {
+        const nec = (r.extras.necesidades || []).map(n => `<span class="badge tipo-donacion">${NEC_NOMBRE[n] || esc(n)}</span>`).join(' ');
+        html += `<div class="dato"><div class="clave">Se necesita</div><div class="valor-d">${nec || '—'}</div></div>`;
+      }
+      html += fila('Horario', r.extras.horario);
     }
     if (esRefugio(r)) {
       const serv = (r.extras.servicios || []).map(x => `<span class="badge tipo-donacion">${SERVICIO_NOMBRE[x] || esc(x)}</span>`).join(' ');
@@ -1437,13 +1444,18 @@ const Detalle = (function(){
           ${svgIcono('refugio','currentColor',18)} Llamar al refugio · ${esc(tel)}</a>`;
       }
     }
-    // vigencia + aviso de coordinación (daños y ayudas)
-    const enPunto = ['dano','donacion'].includes(r.tipo) && !r.resuelto;
+    // vigencia + aviso de coordinación + necesidades editables (daños y ayudas)
     if (enPunto) {
       const act = ultimaActividad(r), apagado = esApagado(r);
       html += `<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">${coordBadges(r)}
         <span style="color:${apagado ? 'var(--error)' : 'var(--muted)'};font-size:13px">${
           act ? (apagado ? 'Sin confirmar ' : 'Actualizado ') + haceTexto(act) : ''}</span></div>`;
+      html += `<div class="dato"><div class="clave">Qué se necesita</div><div class="valor-d">
+        <div class="chips" id="chips-nec" style="margin-top:2px"></div>
+        <div id="nec-editor" class="oculto" style="display:flex;gap:8px;margin-top:8px">
+          <input id="nec-input" maxlength="40" placeholder="Ej.: palas, agua, linternas" style="flex:1">
+          <button class="btn" id="nec-ok" type="button">Agregar</button>
+        </div></div></div>`;
     }
     html += fila('Ubicación', `${r.ciudad}, ${r.departamento}${r.direccion ? ' — ' + r.direccion : ''}`)
           + fila('Descripción', r.descripcion)
@@ -1561,6 +1573,41 @@ const Detalle = (function(){
     }));
     $$('#sheet-contenido .num-gente').forEach(inp => inp.addEventListener('input', () =>
       programarGente(inp.id === 'num-ayudando' ? 'ayudando' : 'faltan')));
+    // "qué se necesita" editable: chips con ✕ para quitar + añadir inline
+    const necesidadesDe = () =>
+      (r.tipo === 'dano' ? (r.extras.ayuda_tipos || []) : []).concat(r.extras.necesidades || []);
+    function pintarNec(){
+      const cont = $('#chips-nec'); if (!cont) return;
+      cont.innerHTML = necesidadesDe().map(v =>
+        `<button class="chip chip-nec" type="button" data-valor="${esc(v)}" aria-label="Quitar ${esc(v)}">${
+          AYUDA_NOMBRE[v] || NEC_NOMBRE[v] || esc(v)} ✕</button>`).join(' ')
+        + ` <button class="chip" type="button" id="btn-nec-add">+ Añadir</button>`;
+      cont.querySelectorAll('.chip-nec').forEach(ch =>
+        ch.addEventListener('click', () => enviarNecesidad('quitar', ch.dataset.valor)));
+      $('#btn-nec-add').addEventListener('click', () => {
+        $('#nec-editor').classList.remove('oculto'); $('#nec-input').focus();
+      });
+    }
+    async function enviarNecesidad(accion, valor){
+      valor = (valor || '').trim();
+      if (valor.length < 2) return;
+      try {
+        const res = await fetch(`/api/reportes/${encodeURIComponent(r.id)}/necesidades`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({accion, valor}),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
+        r.extras = d.extras;
+        if ($('#nec-input')) $('#nec-input').value = '';
+        pintarNec(); Avistamiento.cargar(r.id); Mapa.recargar();
+      } catch(e) { toast(e.message === 'Failed to fetch' ? 'Sin conexión; intenta de nuevo.' : e.message, 'error'); }
+    }
+    pintarNec();
+    $('#nec-ok')?.addEventListener('click', () => enviarNecesidad('agregar', $('#nec-input').value));
+    $('#nec-input')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); enviarNecesidad('agregar', $('#nec-input').value); }
+    });
     $('#btn-compartir')?.addEventListener('click', async () => {
       const url = location.origin + '/#r=' + encodeURIComponent(r.id);
       // el enlace va dentro del texto para que el mensaje llegue completo
@@ -1618,6 +1665,7 @@ const Contacto = (function(){
 /* ═══ Avistamientos: tracker comunitario de "lo vi en tal parte" ═══ */
 const Avistamiento = (function(){
   let rid = null;
+  const fotoAvi = montarFoto('#ma-foto', '#ma-foto-prev');
   async function cargar(id){
     const cont = $('#avist-lista'); if (!cont || cont.dataset.reporte !== id) return;
     try {
@@ -1628,7 +1676,11 @@ const Avistamiento = (function(){
             ? `<div style="border-left:3px solid var(--border);padding:2px 0 2px 10px;margin:5px 0;color:var(--muted);font-size:13px">
                 ${esc(a.nota)} · <small>${esc(fechaCorta(a.creado_en))}</small></div>`
             : `<div style="border-left:3px solid var(--indigo-dim);padding:4px 0 4px 10px;margin:6px 0">
-                ${esc(a.nota)}<br><small style="color:var(--muted)">${esc(fechaCorta(a.creado_en))}</small></div>`).join('')
+                ${esc(a.nota)}${a.foto
+                  ? `<br><a href="/api/avistamientos/${a.id}/foto" target="_blank" rel="noopener"><img
+                      src="/api/avistamientos/${a.id}/foto" alt="Foto adjunta a la nota" loading="lazy"
+                      style="max-width:150px;max-height:150px;object-fit:cover;border-radius:10px;border:1px solid var(--border);margin-top:6px"></a>` : ''}
+                <br><small style="color:var(--muted)">${esc(fechaCorta(a.creado_en))}</small></div>`).join('')
         : `<span style="color:var(--muted)">${cont.dataset.zona === '1'
             ? 'Aún no hay actualizaciones. Si conoces el estado del punto, agrégala con el botón de arriba.'
             : 'Aún no hay avistamientos. Si lo has visto, repórtalo con el botón de arriba.'}</span>`;
@@ -1649,6 +1701,7 @@ const Avistamiento = (function(){
       ? 'Ej.: seguimos recibiendo agua y cobijas; ropa ya no necesitamos'
       : 'Ej.: lo vi hoy ~4pm en el parque de la 14 con 5, iba hacia el sur';
     $('#ma-nota').value = '';
+    fotoAvi.reset();
     $('#err-ma').classList.remove('visible');
     $('#modal-avistamiento').classList.add('visible');
     $('#ma-nota').focus();
@@ -1665,11 +1718,11 @@ const Avistamiento = (function(){
     try {
       const res = await fetch(`/api/reportes/${encodeURIComponent(rid)}/avistamientos`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({nota}),
+        body: JSON.stringify({nota, foto: fotoAvi.valor()}),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
-      const id = rid; cerrar();
+      const id = rid; cerrar(); fotoAvi.reset();
       toast('Avistamiento registrado — gracias por la pista.', 'exito');
       cargar(id);
     } catch(e) { toast(e.message === 'Failed to fetch' ? 'Sin conexión; intenta de nuevo.' : e.message, 'error'); }

@@ -193,7 +193,7 @@ async function cargarReportes(){
       <td>${esc(r.ciudad)}<br><span class="muted">${esc(r.direccion || '')}</span></td>
       <td style="max-width:340px">${esc(resumen(r))}</td>
       <td>${esc(r.telefono_contacto || '—')}</td>
-      <td><span class="badge ${r.estado}">${r.estado}</span>${r.resuelto ? '<br><span class="badge visible">encontrado</span>' : ''}<br><span class="muted">${esc(r.moderado_por || '')}</span></td>
+      <td><span class="badge ${r.estado}">${r.estado}</span>${r.resuelto ? `<br><span class="badge visible">${r.resuelto === 2 ? 'fallecido' : 'encontrado'}</span>` : ''}<br><span class="muted">${esc(r.moderado_por || '')}</span></td>
       <td style="white-space:nowrap"></td>`;
     const acciones = tr.lastElementChild;
     if (r.estado !== 'eliminado') {

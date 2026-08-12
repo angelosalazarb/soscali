@@ -174,6 +174,7 @@ label .req{color:var(--error)}
 .badge.grave,.badge.colapso{background:rgba(105,42,39,.12);color:var(--vino)}
 .badge.moderado{background:rgba(188,110,86,.15);color:#8a4a34}
 .badge.leve{background:rgba(7,93,77,.1);color:var(--esmeralda)}
+.badge.luto{background:rgba(60,56,70,.1);color:#4a4453}
 .badge.tipo-desaparecido{background:var(--indigo-dim);color:var(--indigo)}
 .badge.tipo-donacion{background:rgba(0,51,42,.09);color:var(--verde-prof)}
 .badge.alerta{background:rgba(156,53,50,.12);color:var(--error)}
@@ -316,6 +317,7 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
     <button class="chip" data-tipo="donacion" aria-pressed="false">Ayudas</button>
     <button class="chip" data-tipo="mascota" aria-pressed="false">Mascotas</button>
     <button class="chip" data-tipo="" data-resuelto="1" aria-pressed="false">Encontrados</button>
+    <button class="chip" data-tipo="" data-resuelto="2" aria-pressed="false">Fallecidos</button>
   </div>
   <div class="filtros-fila">
     <select id="filtro-depto" aria-label="Filtrar por departamento"><option value="">Departamento: todos</option></select>
@@ -738,9 +740,9 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
 <div class="modal-fondo" id="modal-encontrado" role="dialog" aria-modal="true" aria-labelledby="me-titulo">
   <div class="modal">
     <h3 id="me-titulo">¡Qué buena noticia!</h3>
-    <p>Cuéntanos brevemente cómo o dónde apareció. El reporte quedará marcado
+    <p id="me-desc">Cuéntanos brevemente cómo o dónde apareció. El reporte quedará marcado
        como <strong>encontrado</strong> para avisar a todos los que lo buscaban.</p>
-    <label for="me-comentario">¿Cómo apareció? <span class="req" aria-hidden="true">*</span></label>
+    <label for="me-comentario" id="me-label">¿Cómo apareció? <span class="req" aria-hidden="true">*</span></label>
     <textarea id="me-comentario" maxlength="500" placeholder="Ej.: apareció en casa de un vecino, está bien y ya está con su familia"></textarea>
     <p class="error-campo" id="err-me">Escribe un comentario breve (mínimo 5 letras).</p>
     <div style="display:flex;gap:9px;margin-top:18px">
@@ -819,6 +821,7 @@ function svgIcono(tipo, color, tam=18){
   return `<svg width="${tam}" height="${tam}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONO[tipo]}</svg>`;
 }
 function colorReporte(r){
+  if (r.resuelto === 2) return '#5d5665'; // fallecido: gris sobrio
   if (r.resuelto) return '#075d4d';   // encontrado/reunido: verde esperanza
   if (esRefugio(r)) return '#075d4d';   // refugio: verde, distinto del acopio
   return r.tipo === 'dano' ? (SEV_COLOR[r.extras.severidad] || '#bc6e56') : TIPO_META[r.tipo].color;
@@ -1137,7 +1140,7 @@ const Mapa = (function(){
           : `<span class="icono">${svgIcono(r.tipo, colorReporte(r), 22)}</span>`}
         <div><h3>${esc(titulo)}${badgeSev}</h3>
         <p>${esc(r.ciudad)}, ${esc(r.departamento)}${dirSub} · ${esc(fechaCorta(r.creado_en))}${(r.confirmaciones || 1) > 1 ? ` · <strong style="color:var(--esmeralda)">${r.confirmaciones} reportes</strong>` : ''}</p>
-        ${r.resuelto ? '<p><span class="badge leve">Encontrado</span></p>'
+        ${r.resuelto ? `<p><span class="badge ${r.resuelto === 2 ? 'luto">Fallecido' : 'leve">Encontrado'}</span></p>`
           : (r.tipo === 'mascota' && r.extras.situacion === 'encontrada'
              ? '<p><span class="badge leve">Encontrada — buscan a sus dueños</span></p>' : '')}
         ${necesita ? `<p style="color:var(--indigo);font-weight:600">${esc(necesita)}</p>` : ''}
@@ -1316,7 +1319,11 @@ const Detalle = (function(){
           + fila('Reportado', fechaCorta(r.creado_en) + (r.ubicacion_ajustada ? ' · ubicación exacta' : ' · ubicación aproximada'))
           + fila('Comunidad', `${r.confirmaciones || 1} ${(r.confirmaciones || 1) === 1 ? 'persona ha reportado esto' : 'personas han reportado esto'}`);
     const buscable = ['desaparecido','hospital','mascota'].includes(r.tipo);
-    if (buscable && r.resuelto) {
+    if (buscable && r.resuelto === 2) {
+      html += `<div style="margin-top:12px"><span class="badge luto">Fallecido</span></div>`
+            + fila('Información', r.resuelto_comentario)
+            + fila('Marcado', fechaCorta(r.resuelto_en));
+    } else if (buscable && r.resuelto) {
       html += `<div style="margin-top:12px"><span class="badge leve">${r.tipo === 'mascota' ? 'Encontrada' : (r.tipo === 'hospital' ? 'Identificado — reunido' : 'Encontrado')}</span></div>`
             + fila('Cómo apareció', r.resuelto_comentario)
             + fila('Marcado', fechaCorta(r.resuelto_en));
@@ -1333,6 +1340,10 @@ const Detalle = (function(){
       }
       html += `<button class="btn bloque" style="margin-top:9px" id="btn-encontrado">
         ${r.tipo === 'mascota' ? '¡Ya apareció! — marcar encontrada' : '¡Ya apareció! — marcar como encontrado'}</button>`;
+      if (r.tipo === 'desaparecido' || r.tipo === 'hospital') {
+        html += `<button class="btn bloque" style="margin-top:9px;color:var(--muted)" id="btn-fallecido">
+          Lamentablemente falleció — actualizar reporte</button>`;
+      }
     }
     if (r.tipo === 'dano') {
       html += `<button class="btn bloque" style="margin-top:14px" id="btn-avistamiento">
@@ -1349,6 +1360,7 @@ const Detalle = (function(){
     $('#sheet').classList.add('visible'); $('#sheet-fondo').classList.add('visible');
     $('#btn-tengo-info')?.addEventListener('click', () => Contacto.abrir(r.id));
     $('#btn-encontrado')?.addEventListener('click', () => Encontrado.abrir(r.id));
+    $('#btn-fallecido')?.addEventListener('click', () => Encontrado.abrir(r.id, 'fallecido'));
     $('#btn-avistamiento')?.addEventListener('click', () => Avistamiento.abrir(r.id, r.tipo));
     $('#btn-editar')?.addEventListener('click', () => Editar.abrir(r));
     if ($('#avist-lista')) Avistamiento.cargar(r.id);
@@ -1503,9 +1515,19 @@ const Editar = (function(){
 
 /* ═══ Modal "¡Ya apareció!": cierra el ciclo con la buena noticia ═══ */
 const Encontrado = (function(){
-  let rid = null;
-  function abrir(id){
-    rid = id;
+  let rid = null, modo = 'encontrado';
+  function abrir(id, m){
+    rid = id; modo = m || 'encontrado';
+    const luto = modo === 'fallecido';
+    $('#me-titulo').textContent = luto ? 'Lamentamos mucho esta noticia' : '¡Qué buena noticia!';
+    $('#me-desc').innerHTML = luto
+      ? 'Cuéntanos brevemente cómo se confirmó. El reporte quedará marcado como <strong>fallecido</strong> para informar con respeto a quienes lo buscaban.'
+      : 'Cuéntanos brevemente cómo o dónde apareció. El reporte quedará marcado como <strong>encontrado</strong> para avisar a todos los que lo buscaban.';
+    $('#me-label').innerHTML = (luto ? '¿Cómo se confirmó?' : '¿Cómo apareció?') + ' <span class="req" aria-hidden="true">*</span>';
+    $('#me-comentario').placeholder = luto
+      ? 'Ej.: su familia confirmó el fallecimiento; fue identificado en Medicina Legal'
+      : 'Ej.: apareció en casa de un vecino, está bien y ya está con su familia';
+    $('#me-marcar').textContent = luto ? 'Actualizar reporte' : 'Marcar encontrado';
     $('#me-comentario').value = '';
     $('#err-me').classList.remove('visible');
     $('#modal-encontrado').classList.add('visible');
@@ -1523,12 +1545,14 @@ const Encontrado = (function(){
     try {
       const res = await fetch(`/api/reportes/${encodeURIComponent(rid)}/encontrado`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({comentario}),
+        body: JSON.stringify({comentario, desenlace: modo}),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
       cerrar(); Detalle.cerrar();
-      toast('¡Qué buena noticia! Quedó marcado como encontrado.', 'exito');
+      toast(modo === 'fallecido' ? 'El reporte quedó actualizado. Lamentamos mucho la pérdida.'
+                                 : '¡Qué buena noticia! Quedó marcado como encontrado.',
+            modo === 'fallecido' ? '' : 'exito');
       Mapa.recargar();
     } catch(e) { toast(e.message === 'Failed to fetch' ? 'Sin conexión; intenta de nuevo.' : e.message, 'error'); }
     finally { $('#me-marcar').disabled = false; }

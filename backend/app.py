@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS reportes (
   estado             TEXT DEFAULT 'visible',    -- visible | oculto | eliminado (soft delete: nada se borra de la BD)
   canal              TEXT DEFAULT 'web',        -- web | whatsapp (fase 2)
   confirmaciones     INTEGER DEFAULT 1,         -- cuántas personas han reportado/confirmado esto
-  resuelto           INTEGER DEFAULT 0,         -- 1 = encontrado/reunido (desaparecidos, pacientes, mascotas)
+  resuelto           INTEGER DEFAULT 0,         -- 1 = encontrado/reunido (desaparecidos, pacientes, mascotas) · 2 = fallecido (solo personas)
   resuelto_comentario TEXT,                     -- cómo/dónde apareció (público)
   resuelto_en        TEXT,
   creado_en          TEXT DEFAULT (datetime('now')),
@@ -671,7 +671,7 @@ def listar_reportes():
         if request.args.get(campo):
             filtros.append(f"{campo}=?")
             params.append(request.args[campo])
-    if request.args.get("resuelto") in ("0", "1"):
+    if request.args.get("resuelto") in ("0", "1", "2"):
         filtros.append("resuelto=?")
         params.append(int(request.args["resuelto"]))
     # subtipo de ayuda (acopio | refugio) vía json_extract, parametrizado
@@ -1027,12 +1027,15 @@ def crear_avistamiento(rid):
 @app.post("/api/reportes/<rid>/encontrado")
 def marcar_encontrado(rid):
     """Cierra el ciclo con la buena noticia: marca un desaparecido, paciente
-    o mascota como encontrado/reunido. El reporte NO se borra: queda visible
+    o mascota como encontrado/reunido; con desenlace='fallecido' (solo
+    personas) el cierre es el triste. El reporte NO se borra: queda visible
     con la insignia y el comentario, que es información para todos los que lo
     buscaban. Auditado y reversible desde el panel admin."""
     if not _rate_ok(f"enc:{_ip()}", maximo=5, ventana_seg=3600):
         return jsonify({"error": "Demasiadas marcas; intenta más tarde"}), 429
-    comentario = _texto((request.get_json(silent=True) or {}).get("comentario"), 500)
+    data = request.get_json(silent=True) or {}
+    comentario = _texto(data.get("comentario"), 500)
+    fallecido = data.get("desenlace") == "fallecido"
     if len(comentario) < 5:
         return jsonify({"error": "Cuéntanos brevemente cómo o dónde apareció"}), 400
     with db() as conn:
@@ -1040,14 +1043,17 @@ def marcar_encontrado(rid):
                          (rid,)).fetchone()
         if not f or f["tipo"] not in ("desaparecido", "hospital", "mascota"):
             return jsonify({"error": "Reporte no encontrado"}), 404
+        if fallecido and f["tipo"] not in ("desaparecido", "hospital"):
+            return jsonify({"error": "Reporte no encontrado"}), 404
         conn.execute("INSERT INTO resoluciones_log (reporte_id, comentario, ip, user_agent)"
                      " VALUES (?,?,?,?)",
                      (rid, comentario, _ip(), _texto(request.headers.get("User-Agent"), 300)))
         # si ya estaba marcado, el comentario nuevo se suma al log pero el
         # público conserva el primero (el admin ve todos)
         if not f["resuelto"]:
-            conn.execute("UPDATE reportes SET resuelto=1, resuelto_comentario=?,"
-                         " resuelto_en=datetime('now') WHERE id=?", (comentario, rid))
+            conn.execute("UPDATE reportes SET resuelto=?, resuelto_comentario=?,"
+                         " resuelto_en=datetime('now') WHERE id=?",
+                         (2 if fallecido else 1, comentario, rid))
     return jsonify({"ok": True})
 
 

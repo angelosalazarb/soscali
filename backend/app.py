@@ -1113,10 +1113,10 @@ def metricas():
         por_ciudad = [dict(f) for f in conn.execute(
             "SELECT departamento, ciudad, COUNT(*) n FROM reportes"
             " WHERE estado='visible' GROUP BY departamento, ciudad ORDER BY n DESC")]
-        ult24 = conn.execute("SELECT COUNT(*) FROM reportes WHERE estado='visible'"
-                             " AND creado_en >= datetime('now','-1 day')").fetchone()[0]
+        total = conn.execute("SELECT COUNT(*) FROM reportes"
+                             " WHERE estado='visible'").fetchone()[0]
     return jsonify({"por_tipo": por_tipo, "por_ciudad": por_ciudad,
-                    "ultimas_24h": ult24, "encontrados": encontrados,
+                    "total": total, "encontrados": encontrados,
                     "acopios": ayuda["acopios"] or 0, "refugios": ayuda["refugios"] or 0})
 
 

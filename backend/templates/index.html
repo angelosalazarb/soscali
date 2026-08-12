@@ -55,7 +55,6 @@ body{
 .ticker-item{flex:none;padding-right:3rem}
 .disclaimer strong{color:var(--tinta);font-weight:600}
 .disclaimer a{color:var(--indigo);font-weight:600}
-.disclaimer .creditos{color:var(--indigo);font-weight:600}
 @keyframes ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 /* con movimiento reducido: banner estático, centrado y que envuelve */
 @media (prefers-reduced-motion:reduce){
@@ -292,8 +291,8 @@ nav.inferior a.activa::after{content:'';position:absolute;top:0;width:26px;heigh
 <div class="disclaimer" role="note" aria-label="Aviso">
   <div class="ticker">
     <div class="ticker-track">
-      <span class="ticker-item">Iniciativa ciudadana independiente — <strong>no es una fuente oficial del Gobierno de Colombia</strong>. Para emergencias llama a la línea <a href="tel:123">123</a>. &nbsp;·&nbsp; <span class="creditos">@0xpwn3ds4b @belosmaki</span> &nbsp;·&nbsp;</span>
-      <span class="ticker-item" aria-hidden="true">Iniciativa ciudadana independiente — <strong>no es una fuente oficial del Gobierno de Colombia</strong>. Para emergencias llama a la línea 123. &nbsp;·&nbsp; <span class="creditos">@0xpwn3ds4b @belosmaki</span> &nbsp;·&nbsp;</span>
+      <span class="ticker-item">Iniciativa ciudadana independiente — <strong>no es una fuente oficial del Gobierno de Colombia</strong>. Para emergencias llama a la línea <a href="tel:123">123</a>. &nbsp;·&nbsp;</span>
+      <span class="ticker-item" aria-hidden="true">Iniciativa ciudadana independiente — <strong>no es una fuente oficial del Gobierno de Colombia</strong>. Para emergencias llama a la línea 123. &nbsp;·&nbsp;</span>
     </div>
   </div>
 </div>
@@ -1160,7 +1159,7 @@ const Mapa = (function(){
         <div class="metrica"><span class="valor">${m.acopios || 0}</span><span class="nombre">${svgIcono('donacion','#00332a',14)} Puntos de acopio</span></div>
         <div class="metrica"><span class="valor">${m.refugios || 0}</span><span class="nombre">${svgIcono('refugio','#075d4d',14)} Refugios</span></div>
         <div class="metrica"><span class="valor">${m.por_tipo.mascota || 0}</span><span class="nombre">${svgIcono('mascota','#3d2e8a',14)} Mascotas perdidas</span></div>
-        <div class="metrica"><span class="valor">${m.ultimas_24h}</span><span class="nombre">Últimas 24 horas</span></div>
+        <div class="metrica"><span class="valor">${m.total}</span><span class="nombre">Reportes totales</span></div>
         <div class="metrica"><span class="valor" style="color:var(--esmeralda)">${m.encontrados || 0}</span><span class="nombre">Encontrados</span></div>`;
     } catch(e) { /* métricas no críticas */ }
   }

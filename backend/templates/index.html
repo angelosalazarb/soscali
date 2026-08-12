@@ -1273,7 +1273,8 @@ const Mapa = (function(){
           ? ` <span style="color:var(--error);font-size:12.5px">sin confirmar ${haceTexto(ultimaActividad(r))}</span>` : ''}</p>` : ''}
         ${necesita ? `<p style="color:var(--indigo);font-weight:600">${esc(necesita)}</p>` : ''}
         ${r.ultima_nota ? `<p style="color:var(--tinta)">${svgIcono(r.tipo === 'dano' ? 'dano' : r.tipo, 'var(--muted)', 13)} <em>“${esc(r.ultima_nota)}”</em> · <span style="color:var(--muted)">${esc(fechaCorta(r.ultima_nota_en))}</span></p>` : ''}</div>`;
-      const abrir = () => Detalle.abrir(r);
+      // al elegir de la lista, el mapa acompaña: zoom directo al punto
+      const abrir = () => { centrar(r.lat, r.lng); Detalle.abrir(r); };
       el.addEventListener('click', abrir);
       el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(); } });
       cont.appendChild(el);

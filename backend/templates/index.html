@@ -1289,7 +1289,7 @@ const Mapa = (function(){
                style="width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid var(--border);flex:none">`
           : `<span class="icono">${svgIcono(r.tipo, colorReporte(r), 22)}</span>`}
         <div><h3>${esc(titulo)}${badgeSev}</h3>
-        <p>${esc(r.ciudad)}, ${esc(r.departamento)}${dirSub} · ${esc(fechaCorta(r.creado_en))}${(r.confirmaciones || 1) > 1 ? ` · <strong style="color:var(--esmeralda)">${r.confirmaciones} reportes</strong>` : ''}</p>
+        <p>${esc(r.ciudad)}, ${esc(r.departamento)}${dirSub} · ${esc(fechaCorta(r.creado_en))}${(r.confirmaciones || 1) > 1 ? ` · <strong style="color:var(--esmeralda)">${r.confirmaciones} confirman</strong>` : ''}</p>
         ${r.resuelto ? `<p><span class="badge ${r.resuelto === 2 ? 'luto">Fallecido' : esOferta(r) ? 'leve">Entregada' : 'leve">Encontrado'}</span></p>`
           : (r.tipo === 'mascota' && r.extras.situacion === 'encontrada'
              ? '<p><span class="badge leve">Encontrada — buscan a sus dueños</span></p>' : '')}
@@ -1372,6 +1372,10 @@ function esApagado(r){
   if (!['dano','donacion'].includes(r.tipo) || r.resuelto) return false;
   const t = ultimaActividad(r);
   return t != null && Date.now() - t > APAGADO_MS;
+}
+function textoComunidad(r){
+  const n = r.confirmaciones || 1;
+  return `Reportado/confirmado por ${n} ${n === 1 ? 'persona' : 'personas'}`;
 }
 function coordBadges(r){
   // aviso de coordinación: reparte a los voluntarios entre puntos
@@ -1589,7 +1593,7 @@ const Detalle = (function(){
     html += fila('Ubicación', `${r.ciudad}, ${r.departamento}${r.direccion ? ' — ' + r.direccion : ''}`)
           + fila('Descripción', r.descripcion)
           + fila('Reportado', fechaCorta(r.creado_en) + (r.ubicacion_ajustada ? ' · ubicación exacta' : ' · ubicación aproximada'))
-          + fila('Comunidad', `${r.confirmaciones || 1} ${(r.confirmaciones || 1) === 1 ? 'persona ha reportado esto' : 'personas han reportado esto'}`);
+          + `<div class="dato"><div class="clave">Comunidad</div><div class="valor-d" id="comunidad-n">${textoComunidad(r)}</div></div>`;
     if (enPunto) {
       html += `<div class="dato"><div class="clave">Gente en el punto</div><div class="valor-d">
         <div class="fila-gente"><input class="num-gente" id="num-ayudando" type="number" min="0" max="9999"
@@ -1685,6 +1689,8 @@ const Detalle = (function(){
         const d = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(d.error || 'HTTP ' + res.status);
         r.vigente_en = d.vigente_en;
+        if (d.confirmaciones) r.confirmaciones = d.confirmaciones;
+        if ($('#comunidad-n')) $('#comunidad-n').textContent = textoComunidad(r);
         toast('Gracias por confirmar: el punto queda marcado como vigente.', 'exito');
         Avistamiento.cargar(r.id); Mapa.recargar();
       } catch(e) { toast(e.message === 'Failed to fetch' ? 'Sin conexión; intenta de nuevo.' : e.message, 'error'); }

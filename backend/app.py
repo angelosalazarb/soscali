@@ -1247,7 +1247,8 @@ def actualizar_gente(rid):
 def marcar_vigente(rid):
     """'Sigo aquí, esto sigue vigente': confirmación de frescura con un toque.
     Actualiza vigente_en (de ahí sale el "hace X min" y el apagado visual de
-    los puntos viejos) y deja constancia en la bitácora."""
+    los puntos viejos), suma al contador comunitario de confirmaciones (una
+    por IP, mismo candado que /confirmar) y deja constancia en la bitácora."""
     if not _rate_ok(f"vig:{_ip()}", maximo=10, ventana_seg=3600):
         return jsonify({"error": "Demasiadas confirmaciones; intenta más tarde"}), 429
     with db() as conn:
@@ -1256,13 +1257,19 @@ def marcar_vigente(rid):
         if not f or f["tipo"] not in ("dano", "donacion"):
             return jsonify({"error": "Reporte no encontrado"}), 404
         conn.execute("UPDATE reportes SET vigente_en=datetime('now') WHERE id=?", (rid,))
+        nuevo = conn.execute(
+            "INSERT INTO confirmaciones_log (reporte_id, ip, user_agent) VALUES (?,?,?)"
+            " ON CONFLICT(reporte_id, ip) DO NOTHING",
+            (rid, _ip(), _texto(request.headers.get("User-Agent"), 300))).rowcount
+        if nuevo:
+            conn.execute("UPDATE reportes SET confirmaciones=confirmaciones+1 WHERE id=?", (rid,))
         conn.execute("INSERT INTO avistamientos (reporte_id, nota, evento, ip, user_agent)"
                      " VALUES (?,?,'vigente',?,?)",
                      (rid, "Confirmado en el punto: sigue vigente.",
                       _ip(), _texto(request.headers.get("User-Agent"), 300)))
-        vigente = conn.execute("SELECT vigente_en FROM reportes WHERE id=?",
-                               (rid,)).fetchone()[0]
-    return jsonify({"ok": True, "vigente_en": vigente})
+        fila = conn.execute("SELECT vigente_en, confirmaciones FROM reportes WHERE id=?",
+                            (rid,)).fetchone()
+    return jsonify({"ok": True, **dict(fila)})
 
 
 @app.post("/api/reportes/<rid>/reabrir")
